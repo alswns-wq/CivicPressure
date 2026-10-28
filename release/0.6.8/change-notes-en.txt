@@ -1,0 +1,3 @@
+0.6.8 — Unified UI Hotfix
+
+Fixed the City Administration icon not appearing in Unified UI in some configurations. The mod now detects an existing Unified UI panel and registers its icon.

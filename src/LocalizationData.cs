@@ -6,6 +6,7 @@ namespace CivicPressure
         private static Dictionary<string, string[]> Build()
         {
             Dictionary<string, string[]> d = new Dictionary<string, string[]>();
+            d.Add("일부 환경에서 Unified UI에 도시 행정 아이콘이 표시되지 않던 문제를 수정했습니다.", new string[] { "Fixed the city administration icon not appearing in Unified UI in some configurations.", "修复部分环境下城市行政图标未在 Unified UI 中显示的问题。", "一部の環境で都市行政アイコンが Unified UI に表示されない問題を修正しました。", "Se corrigió un problema que impedía mostrar el icono de administración en Unified UI en algunas configuraciones." });
             d.Add("경찰 도착 · 현장 진압과 저항 진행 중", new string[] { "Police arrived · Suppression and resistance in progress", "警方已到场 · 正在镇压与抵抗", "警察到着・鎮圧と抵抗が進行中", "Policía presente · Intervención y resistencia en curso" });
             d.Add("현장 진압 중 · 남은 저항 인원과 경찰 상태로 승패 결정", new string[] { "Intervention underway · Outcome depends on remaining resistance and police", "正在镇压 · 按剩余抵抗人员与警力状态判定胜负", "鎮圧中・残る抵抗者と警察の状態で勝敗を判定", "Intervención en curso · Resultado según la resistencia y los policías restantes" });
             d.Add("경찰 도착 대기 · 현장 전투로 진압 판정", new string[] { "Awaiting police · Outcome decided by the confrontation", "等待警方到场 · 由现场战斗决定结果", "警察の到着待ち・現場の戦闘で結果を判定", "Esperando a la policía · El enfrentamiento determina el resultado" });

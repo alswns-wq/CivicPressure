@@ -28,7 +28,7 @@ namespace CivicPressure
             try
             {
                 Assembly library = EnabledLibrary();
-                if (library == null) return false;
+                if (library == null) { Warn("enabled Unified UI or its library was not detected"); return false; }
                 MethodInfo register = FindRegister(library.GetType(ApiTypeName, false));
                 if (register == null) { Warn("its button API has changed"); return false; }
                 Texture2D icon = LoadIcon();
@@ -59,6 +59,18 @@ namespace CivicPressure
                 if (!IsUnifiedUIMod(plugin.userModInstance.GetType().FullName)) continue;
                 foreach (Assembly assembly in plugin.GetAssemblies())
                     if (assembly.GetName().Name == LibraryName) return assembly;
+                // Unity may resolve a shared library from another mod instead of listing it with this plugin.
+                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                    if (assembly.GetName().Name == LibraryName && FindRegister(assembly.GetType(ApiTypeName, false)) != null) return assembly;
+            }
+            // Other mods can provide an already active Unified UI panel without the standalone mod enabled.
+            // Exists is a non-creating check; never construct a panel merely because a bundled library is loaded.
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly.GetName().Name != LibraryName || FindRegister(assembly.GetType(ApiTypeName, false)) == null) continue;
+                Type panel = assembly.GetType("UnifiedUI.GUI.MainPanel", false);
+                PropertyInfo exists = panel == null ? null : panel.GetProperty("Exists", BindingFlags.Public | BindingFlags.Static);
+                if (exists != null && exists.PropertyType == typeof(bool) && (bool)exists.GetValue(null, null)) return assembly;
             }
             return null;
         }
