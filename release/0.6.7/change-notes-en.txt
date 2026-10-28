@@ -1,0 +1,10 @@
+0.6.7 — Tension in the Streets
+
+- Reworked peaceful protests into loose marches and riots into individual movement and resistance. March speeds are now 170 for protests and 150 for riots.
+- Rioters attack parked and moving road vehicles. Occupants leave before rocking, sliding, overturning and fire effects. Ambulances are excluded; damaged vehicles are cleared gradually after the incident.
+- Added police lines, tear gas, batons, rubber rounds and live ammunition, plus retreat, arrests, paramedic treatment and reinforcements. Outcomes now follow the confrontation instead of a fixed failure chance.
+- Added crowd/response sounds, skull markers, weapon looting and injury/death totals for both sides in incident reports. No blood effects.
+- Improved nearby parking for arriving police cars, reinforcement retries, protection against attacked service vehicles disappearing, movement facing and crowd visibility.
+- Included building-state-based service complaint criteria and excluded shortages of services that have not yet been unlocked.
+
+Older saves remain readable. Casualty reports use the new v8 format; keep a pre-update city save if you may return to an older mod version.

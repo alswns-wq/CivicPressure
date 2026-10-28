@@ -1,0 +1,17 @@
+[
+    {
+        "Path":  "Content/AUDIO_CREDITS.txt",
+        "Bytes":  1695,
+        "SHA256":  "D379C5D012FD9EE42F9CF1F8EE0E6AE16C8DD0648104EB63D7627A620039C2BD"
+    },
+    {
+        "Path":  "Content/CivicPressure.dll",
+        "Bytes":  1908736,
+        "SHA256":  "9106CF00BD1FC3C73A8A7D0141C323A591FD11FE19CE6EEAEF3254E3E9473C03"
+    },
+    {
+        "Path":  "PreviewImage.png",
+        "Bytes":  324334,
+        "SHA256":  "FDC36A100896A946D910A9AC11DB200F6254AAF1CBBEEB835AA82D3F9AF8E33A"
+    }
+]
