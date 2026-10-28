@@ -1,4 +1,29 @@
-# CivicPressure
+# Civic Pressure
+
+A Cities: Skylines 1 mod that turns city problems into citizen complaints, administrative challenges, protests and riots.
+
+## Features
+
+- Citizen complaints based on city conditions, with City Hall and district offices.
+- Citizen visits, facility opposition, administrative reviews and district trust.
+- Protests, riots, vehicle attacks and police responses.
+- Support for Korean, English, Simplified Chinese, Japanese and Spanish.
+
+## Installation
+
+Subscribe to [Civic Pressure on Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3802426237) and its required dependency, [Harmony 2](https://steamcommunity.com/sharedfiles/filedetails/?id=2040656402). Enable both mods, load a city and press **Ctrl + /** to open the administration panel. The shortcut can be changed in mod options.
+
+Unified UI and Real Time are optional.
+
+## Building
+
+The source targets .NET Framework 3.5. On Windows, use `build.ps1` with a local Cities: Skylines 1 installation and CitiesHarmony.Harmony.dll. Run `build.ps1 -Dev` for the separate developer build. Game assemblies and Harmony are not included in this repository.
+
+## 한국어 소개
+
+Civic Pressure는 도시 문제를 시민 민원과 행정 과제, 시위와 폭동으로 이어주는 Cities: Skylines 1 모드입니다. 시청과 구청을 지정해 민원을 처리하고, 시민 방문과 시설 반대, 행정 평가 및 경찰 대응을 살펴볼 수 있습니다.
+
+[스팀 창작마당](https://steamcommunity.com/sharedfiles/filedetails/?id=3802426237)에서 모드와 필수 모드 Harmony 2를 구독하고 활성화한 뒤, 도시에서 **Ctrl + /**를 눌러 행정 창을 여세요. 단축키는 옵션에서 변경할 수 있습니다.
 
 ## Source code notice
 
