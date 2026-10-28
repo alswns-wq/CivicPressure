@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="3.5" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Platform Condition="'$(Platform)' == ''">AnyCPU</Platform>
+    <ProjectGuid>{D95BB585-85C4-47E9-9FC6-7F553EB4C681}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>CivicPressure</RootNamespace>
+    <AssemblyName>CivicPressure</AssemblyName>
+    <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)\</IntermediateOutputPath>
+    <WarningLevel>4</WarningLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+    <DebugSymbols Condition="'$(Configuration)' == 'Debug'">true</DebugSymbols>
+    <DebugType Condition="'$(Configuration)' == 'Debug'">full</DebugType>
+  </PropertyGroup>
+  <!-- Local developer build: build.ps1 -Dev. Separate assembly name and output folders from the Workshop build. -->
+  <PropertyGroup Condition="'$(Edition)' == 'Dev'">
+    <AssemblyName>CivicPressureDev</AssemblyName>
+    <DefineConstants>$(DefineConstants);DEV</DefineConstants>
+    <OutputPath>bin\Dev\$(Configuration)\</OutputPath>
+    <IntermediateOutputPath>obj\Dev\$(Configuration)\</IntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="TrafficRouting.cs" />
+    <Compile Include="CivicRecords.cs" /><Compile Include="ProtestDemands.cs" /><Compile Include="ComplaintHistory.cs" /><Compile Include="HappinessTrend.cs" /><Compile Include="CensusProjection.cs" /><Compile Include="ComplaintRecurrence.cs" /><Compile Include="UnifiedUIButton.cs" /><Compile Include="Edition.cs" /><Compile Include="GameClock.cs" /><Compile Include="ReleaseNotes.cs" /><Compile Include="NoticePanel.cs" /><Compile Include="VisitModel.cs" /><Compile Include="CivicVisits.cs" /><Compile Include="DevTools.cs" /><Compile Include="LocaleFile.cs" /><Compile Include="StandingModel.cs" /><Compile Include="CivicStanding.cs" /><Compile Include="ReviewWindow.cs" />
+    <EmbeddedResource Include="Resources\UnifiedUIIcon.png"><LogicalName>CivicPressure.UnifiedUIIcon.png</LogicalName></EmbeddedResource>
+    <Reference Include="System">
+      <HintPath>$(GameManagedPath)\System.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="CitiesHarmony.Harmony">
+      <HintPath>$(HarmonyPath)</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="ICities">
+      <HintPath>$(GameManagedPath)\ICities.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameManagedPath)\Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="ColossalManaged">
+      <HintPath>$(GameManagedPath)\ColossalManaged.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(GameManagedPath)\UnityEngine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Compile Include="Mod.cs" />
+    <Compile Include="Localization.cs" /><Compile Include="LocalizationData.cs" /><Compile Include="LanguageSettings.cs" /><Compile Include="LocalizedUI.cs" />
+    <Compile Include="CivicModel.cs" />
+    <Compile Include="ComplaintModel.cs" />
+    <Compile Include="CivicComplaints.cs" />
+    <Compile Include="CivicSimulation.cs" />
+    <Compile Include="CityCensus.cs" /><Compile Include="ComplaintHotspot.cs" /><Compile Include="AmenityCoverage.cs" />
+    <Compile Include="BuildingArea.cs" />
+    <Compile Include="CivicPanel.cs" />
+    <Compile Include="FloatingButton.cs" />
+    <Compile Include="ShortcutSettings.cs" />
+    <Compile Include="UnrestModel.cs" />
+    <Compile Include="UnrestRoads.cs" />
+    <Compile Include="UnrestSettings.cs" />
+    <Compile Include="UnrestPatches.cs" />
+    <Compile Include="CivicUnrest.cs" />
+    <Compile Include="CivicChirper.cs" />
+    <Compile Include="PoliceDeployment.cs" />
+    <Compile Include="CrowdPreview.cs" />
+    <Compile Include="CrowdActor.cs" />
+    <Compile Include="DevVehicleAssault.cs" />
+    <Compile Include="DevRiotSuppression.cs" /><Compile Include="DevPoliceTactics.cs" /><Compile Include="DevCrowdCombat.cs" /><Compile Include="DevCasualties.cs" /><Compile Include="DevMedics.cs" /><Compile Include="DevLoot.cs" /><Compile Include="DevBuildingDamage.cs" />
+    <Compile Include="DevPoliceLine.cs" />
+    <Compile Include="DevCrowdAudio.cs" />
+    <Compile Include="DevProtestMarch.cs" />
+    <Compile Include="DevVisualMotion.cs" />
+    <Compile Include="DevAutomaticAssault.cs" />
+    <Compile Include="DevParkedAssault.cs" />
+    <Compile Include="DevRiotCrowd.cs" />
+    <Compile Include="DevRoadCorridor.cs" />
+    <Compile Include="DevRiotPassage.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Audio\crowd.pcm"><LogicalName>CivicPressure.Audio.crowd.pcm</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\Audio\shot.pcm"><LogicalName>CivicPressure.Audio.shot.pcm</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\Audio\live-shot.pcm"><LogicalName>CivicPressure.Audio.live-shot.pcm</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\Audio\impact.pcm"><LogicalName>CivicPressure.Audio.impact.pcm</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\Audio\CREDITS.txt"><LogicalName>CivicPressure.Audio.CREDITS.txt</LogicalName></EmbeddedResource>
+  </ItemGroup>
+  <Target Name="BeforeBuild">
+    <Error Condition="'$(GameManagedPath)' == ''" Text="Run build.ps1 or pass /p:GameManagedPath=... pointing to CS1 Cities_Data\Managed." />
+    <Error Condition="!Exists('$(GameManagedPath)\ICities.dll') Or !Exists('$(GameManagedPath)\UnityEngine.dll') Or !Exists('$(GameManagedPath)\Assembly-CSharp.dll')" Text="The CS1 game assemblies are missing. CS2 assemblies are not supported." />
+  </Target>
+</Project>
