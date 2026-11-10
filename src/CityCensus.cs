@@ -6,7 +6,12 @@ namespace CivicPressure
 {
     internal sealed class CityCensus
     {
-        private struct Sample { internal byte District; internal int Harms, Severe, Needs, SevereNeeds; }
+        internal static readonly ServiceWait CrimeWait = new ServiceWait(), MedicalWait = new ServiceWait();
+        internal static readonly ServiceWait EducationWait = new ServiceWait(), HousingWait = new ServiceWait();
+        private readonly bool[] schoolUnlocked = new bool[3];
+        internal static void ForgetCitizen(uint id)
+        { MedicalWait.Forget(id); EducationWait.Forget(id); HousingWait.Forget(id); }
+        private struct Sample { internal byte District; internal int Harms, Severe, Needs; }
         private readonly Sample[] samples;
         internal readonly int[] Residents = new int[256], Buildings = new int[256], Abandoned = new int[256], Warning = new int[256], Major = new int[256];
         internal readonly int[][] Affected = new int[256][], Severe = new int[256][];
@@ -44,6 +49,13 @@ namespace CivicPressure
         internal CityCensus(int capacity)
         {
             samples = new Sample[capacity];
+            if (Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.Education))
+                for (uint p = 0; p < PrefabCollection<BuildingInfo>.LoadedCount(); p++) {
+                    BuildingInfo info = PrefabCollection<BuildingInfo>.GetLoaded(p);
+                    if (info == null || !(info.m_buildingAI is SchoolAI) || info.m_class == null) continue;
+                    int level = (int)info.m_class.m_level;
+                    if (level >= 0 && level < 3 && Singleton<UnlockManager>.instance.Unlocked(info.m_UnlockMilestone)) schoolUnlocked[level] = true;
+                }
             citizenCapacity = Singleton<CitizenManager>.instance.m_citizens.m_buffer.Length;
             for (int i = 0; i < 256; i++) { Affected[i] = new int[Happiness.Weights.Length]; Severe[i] = new int[Happiness.Weights.Length]; }
         }
@@ -60,18 +72,12 @@ namespace CivicPressure
                 {
                     if((buildingCursor&63)==0 && System.Diagnostics.Stopwatch.GetTimestamp()>=budgetEnd) break;
                     Building b = buildings[buildingCursor];
-                    if (!CivicSimulation.Live(b)) continue;
+                    if (!CivicSimulation.Live(b)) { CrimeWait.Forget((uint)buildingCursor); continue; }
                     byte district = Singleton<DistrictManager>.instance.GetDistrict(b.m_position);
                     Sample sample = Read((ushort)buildingCursor, b); sample.District = district;
                     if (b.Info != null && b.Info.m_class.m_service == ItemClass.Service.Residential)
                     {
                         sample.Needs |= amenities.Missing(b.m_position);
-                        int local, total;
-                        ImmaterialResourceManager resources = Singleton<ImmaterialResourceManager>.instance;
-                        resources.CheckResource(ImmaterialResourceManager.Resource.HealthCare, b.m_position, out local, out total);
-                        if (ComplaintMapping.ServiceCoverageHarm(Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.HealthCare), local <= 0) && (sample.Harms & (1 << 6)) != 0) { sample.Needs |= 1 << 11; if ((sample.Severe & (1 << 6)) != 0) sample.SevereNeeds |= 1 << 11; }
-                        resources.CheckResource(ImmaterialResourceManager.Resource.PoliceDepartment, b.m_position, out local, out total);
-                        if (ComplaintMapping.ServiceCoverageHarm(Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.PoliceDepartment), local <= 0) && (sample.Harms & (1 << 5)) != 0) { sample.Needs |= 1 << 12; if ((sample.Severe & (1 << 5)) != 0) sample.SevereNeeds |= 1 << 12; }
                     }
                     if (b.m_parentBuilding != 0 && b.m_parentBuilding < buildings.Length && CivicSimulation.Live(buildings[b.m_parentBuilding]))
                     {
@@ -99,42 +105,46 @@ namespace CivicPressure
             {
                 if((citizenCursor&63)==0 && System.Diagnostics.Stopwatch.GetTimestamp()>=budgetEnd) break;
                 Citizen c = citizens[citizenCursor];
-                if ((c.m_flags & Citizen.Flags.Created) == 0) continue;
+                if ((c.m_flags & Citizen.Flags.Created) == 0) { ForgetCitizen((uint)citizenCursor); continue; }
                 Created++;
-                if ((c.m_flags & (Citizen.Flags.Dead | Citizen.Flags.Tourist | Citizen.Flags.DummyTraffic | Citizen.Flags.MovingIn)) != 0) continue;
+                if ((c.m_flags & (Citizen.Flags.Dead | Citizen.Flags.Tourist | Citizen.Flags.DummyTraffic | Citizen.Flags.MovingIn)) != 0) { ForgetCitizen((uint)citizenCursor); continue; }
                 ushort home = c.m_homeBuilding;
                 bool hasHome = home != 0 && home < samples.Length && CivicSimulation.Live(buildings[home]);
                 if (!hasHome) NoHome++;
                 Sample sample = hasHome ? samples[home] : new Sample();
                 // A workplace is not proof of residence. Unknown residence must not mean district zero.
                 int district = ComplaintMapping.ResidenceDistrict(hasHome, hasHome ? Singleton<DistrictManager>.instance.GetDistrict(buildings[home].m_position) : 0);
-                sample.Harms |= sample.Needs; sample.Severe |= sample.SevereNeeds;
+                sample.Harms |= sample.Needs;
                 bool housing = hasHome && Suitable(buildings[home]);
                 if (housing) Housed[district]++;
                 bool placement = c.m_workBuilding != 0 && c.m_workBuilding < buildings.Length && Suitable(buildings[c.m_workBuilding]);
                 int needs = ComplaintMapping.EssentialHarms(c, housing, placement);
-                if ((needs & (1 << 10)) != 0)
-                {
-                    int education = housing && Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.Education) ?
-                        BuildingServiceRules.EducationSeverity(c, buildings[home]) : 0;
-                    if (education == 0) needs &= ~(1 << 10);
-                    if (education > 1) sample.Severe |= 1 << 10;
-                }
+                long observedAt = Singleton<SimulationManager>.instance.m_currentGameTime.Ticks;
+                Citizen.AgeGroup schoolAge = Citizen.GetAgeGroup(c.Age);
+                int schoolLevel = schoolAge == Citizen.AgeGroup.Child ? 0 : schoolAge == Citizen.AgeGroup.Teen ? 1 : c.Education2 ? 2 : c.Education1 ? 1 : 0;
+                bool assignedSchool = placement && buildings[c.m_workBuilding].Info != null &&
+                    buildings[c.m_workBuilding].Info.m_class != null &&
+                    buildings[c.m_workBuilding].Info.m_class.m_service == ItemClass.Service.Education;
+                bool schoolNeeded = (ComplaintMapping.EssentialHarms(c, housing, assignedSchool) & (1 << 10)) != 0;
+                needs &= ~((1 << 8) | (1 << 10));
+                if (EducationWait.Observe((uint)citizenCursor, (uint)(schoolLevel + 1), schoolNeeded && schoolUnlocked[schoolLevel], observedAt)) needs |= 1 << 10;
+                if (HousingWait.Observe((uint)citizenCursor, 1, !housing, observedAt)) needs |= 1 << 8;
                 sample.Harms |= needs;
-                if (!housing) sample.Severe |= 1 << 8;
+                if ((needs & (1 << 8)) != 0) sample.Severe |= 1 << 8;
                 Merge(ref sample, c.m_workBuilding, buildings);
                 if (c.CurrentLocation == Citizen.Location.Visit) Merge(ref sample, c.m_visitBuilding, buildings);
                 // Utility shortage counters on Citizen retain history until ResidentAI next updates.
                 // Current home/work/visit building notifications above are the source for active outages.
                 int health = ComplaintMapping.HealthSeverity(c, sample.Severe);
-                // Known homes use the same household health grade as the building info view.
-                // Citizens without a usable home still retain their own real health problems.
-                if (!hasHome && health > 0) sample.Harms |= 1 << 6;
-                if (!hasHome && health > 1) sample.Severe |= 1 << 6;
-                if (!ComplaintMapping.MedicalServiceHarm((sample.Needs & (1 << 11)) != 0, health))
+                bool receivingCare = c.CurrentLocation == Citizen.Location.Visit && c.m_visitBuilding != 0 &&
+                    c.m_visitBuilding < buildings.Length && Suitable(buildings[c.m_visitBuilding]) &&
+                    buildings[c.m_visitBuilding].Info != null && buildings[c.m_visitBuilding].Info.m_buildingAI is HospitalAI;
+                sample.Harms &= ~((1 << 6) | (1 << 11)); sample.Severe &= ~((1 << 6) | (1 << 11));
+                if (MedicalWait.Observe((uint)citizenCursor, c.m_homeBuilding,
+                    Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.HealthCare) && health > 0 && !receivingCare,
+                    Singleton<SimulationManager>.instance.m_currentGameTime.Ticks))
                 {
-                    sample.Harms &= ~(1 << 11);
-                    sample.Severe &= ~(1 << 11);
+                    AddState(ref sample, 6, health); AddState(ref sample, 11, health);
                 }
                 CitizenInstance[] instances = Singleton<CitizenManager>.instance.m_instances.m_buffer;
                 if (c.m_instance != 0 && c.m_instance < instances.Length) {
@@ -204,10 +214,6 @@ namespace CivicPressure
             if (Suitable(b) && b.Info != null && b.Info.m_buildingAI is CommonBuildingAI)
             {
                 AddState(ref result, 4, BuildingServiceRules.GarbageSeverity(b.m_garbageBuffer));
-                if (Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.PoliceDepartment))
-                    AddState(ref result, 5, BuildingServiceRules.CrimeSeverity(b.m_crimeBuffer, b.m_citizenCount));
-                if (b.Info.m_class.m_service == ItemClass.Service.Residential)
-                    AddState(ref result, 6, BuildingServiceRules.HealthSeverity(b.m_health, b.m_citizenCount));
                 int hazard, size, tolerance;
                 if (Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.FireDepartment) &&
                     b.Info.m_buildingAI.GetFireParameters(id, ref b, out hazard, out size, out tolerance))
@@ -218,6 +224,11 @@ namespace CivicPressure
                     AddState(ref result, 14, BuildingServiceRules.FireSeverity(hazard, size, tolerance, coverage, detectors));
                 }
             }
+            int crime = Suitable(b) && b.Info != null && b.Info.m_buildingAI is CommonBuildingAI &&
+                Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.PoliceDepartment)
+                ? BuildingServiceRules.CrimeSeverity(b.m_crimeBuffer, b.m_citizenCount) : 0;
+            if (CrimeWait.Observe(id, b.m_buildIndex, crime > 0, Singleton<SimulationManager>.instance.m_currentGameTime.Ticks))
+            { AddState(ref result, 5, crime); AddState(ref result, 12, crime); }
             // Congestion is a separate proxy; a building's red power icon must not amplify it.
             NetSegment[] roads = Singleton<NetManager>.instance.m_segments.m_buffer;
             ushort road = b.m_accessSegment;
@@ -258,6 +269,9 @@ namespace CivicPressure
         }
         internal static int FireSeverity(int hazard, int size, int tolerance, int coverage, bool detectors)
         {
+            // Risk alone is advisory when the game reports fire-service coverage.
+            // Actual fires are counted separately by Read, regardless of coverage.
+            if (coverage > 0) return 0;
             if (hazard < 0 || size < 0 || tolerance < 0) return 0;
             if (detectors) hazard = hazard * 75 / 100;
             int good = (int)Math.Min(100L, (10L + tolerance) * (25 + coverage * 100 / 255) * 2000 /

@@ -16,6 +16,10 @@ namespace CivicPressure
     internal enum ComplaintKind { Complaint = 0, Opposition = 1, Suggestion = 2 }
     internal sealed class ComplaintView
     {
+#if DEV
+        internal string AiDistrict, AiService;
+        internal int AiAffected, AiSevere, AiPopulation;
+#endif
         internal int Key, Region;
         internal long Stamp;
         internal string Title, Detail, Road, Stage, LocationLabel;
@@ -321,6 +325,15 @@ namespace CivicPressure
                 c.Reason == ComplaintRules.OddReason ? L.T("기타 요구를 거절하고 종결했습니다.") : L.T("요청을 거절했습니다. 실제 생활 문제와 행복도 감점은 남아 있습니다.");
             CivicChirper.PostComplaint((city.Regions[c.Region] == null ? L.T("지역") : city.Regions[c.Region].Name) + " · " + message, city, c.Region);
         }
+        private static string CitizenVoice(ComplaintRecord c)
+        {
+            if (c.ImprovingSince > 0) return L.T("개선이 계속 유지되는지 지켜보고 있습니다.");
+            if (ComplaintRecurrence.Badge(c).Length > 0) return L.T("해결됐던 문제가 다시 생겼습니다. 지속적인 개선을 부탁드립니다.");
+            if (c.Promised) return L.T("약속하신 조치가 생활 속 변화로 이어지기를 기다리고 있습니다.");
+            return ((c.Since / GameClock.HourTicks + c.Region + c.Reason) % 2 == 0)
+                ? L.T("이 문제로 생활에 불편을 겪고 있습니다. 현장을 확인해 주세요.")
+                : L.T("우리 지역의 불편이 나아질 수 있도록 대책을 검토해 주세요.");
+        }
         private static bool LiveRoad(RoadResidents road)
         {
             NetSegment[] roads = Singleton<NetManager>.instance.m_segments.m_buffer;
@@ -353,6 +366,12 @@ namespace CivicPressure
                     CanPromise = !c.Promised && now.Ticks < c.Deadline,
                     Road = L.T("문제 도로: 확인 가능한 주거지 도로 없음") };
                 string recurrence=ComplaintRecurrence.Detail(c);
+#if DEV
+                v.AiDistrict = area.Name; v.AiService = Happiness.Reasons[c.Reason];
+                v.AiAffected = Affected(area,c.Region,c.Reason);
+                v.AiSevere = Severe(area,c.Region,c.Reason);
+                v.AiPopulation = Population(area,c.Region,c.Reason);
+#endif
                 if(recurrence.Length>0) v.Detail += "\n"+recurrence;
                 RoadResidents[] top;
                 if (worst.TryGetValue(pair.Key, out top))
@@ -399,10 +418,12 @@ namespace CivicPressure
                     }
                 }
                 double rate = ComplaintRules.Rate(Affected(area,c.Region,c.Reason), Severe(area,c.Region,c.Reason), Population(area,c.Region,c.Reason)) * 100;
-                if (c.Reason == 11) v.Detail += L.T("\n의료 민원 판정: 게임 의료 서비스 범위 부족과 건강 문제가 함께 확인되었습니다.");
-                if (c.Reason == 4 || c.Reason == 5 || c.Reason == 6 || c.Reason == 11 || c.Reason == 12 || c.Reason == 14)
+                if (c.Reason == 5 || c.Reason == 6 || c.Reason == 11 || c.Reason == 12)
+                    v.Detail += "\n" + L.T("범죄·치료 대기는 같은 대상에서 3게임 시간 지속 관찰 후 집계합니다. 치료 중인 시민은 제외하며, 도시를 불러오면 관찰을 다시 시작합니다.");
+                if (c.Reason == 14) v.Detail += "\n" + L.T("소방 범위가 있는 건물의 위험만으로는 민원·감점하지 않습니다. 실제 화재는 별도로 집계합니다.");
+                if (c.Reason == 4 || c.Reason == 5 || c.Reason == 12 || c.Reason == 14)
                     v.Detail += L.T("\n건물 상태 판정: 불량 방향 60%부터 경고, 80%부터 심각입니다. 실제 화재는 항상 심각입니다.");
-                if (c.Reason == 10) v.Detail += "\n" + L.T("해당 교육 단계 이수율 40% 이하와 학교 배정 부족을 함께 확인 · 20% 이하는 심각");
+                if (c.Reason == 10) v.Detail += "\n" + L.T("해금된 교육단계의 학교 미배정이 3게임 시간 지속 · 기존 주민 학력은 제외");
                 if (c.LaborExtended) v.Detail += L.T("\n고용 피해율 20% 감소 확인 · 추가 대응 시간 지급 완료");
                 v.Road += "\n\n" + (Local(c.Reason) ? L.T("현장 관할 기준 환산 피해 ") : L.T("구 전체 환산 피해 ")) + rate.ToString("0.###") + L.T("% · 접수 > ") +
                     (ComplaintRules.OpenRatio(c.Reason)*100).ToString("0.###") + L.T("% · 종결 ≤ ") +
@@ -414,6 +435,9 @@ namespace CivicPressure
                 }
                 else if (now.Ticks >= c.Deadline) v.Stage += L.T(" · 대응 기한 초과");
                 else if (c.Promised) v.Stage += L.T(" · 개선 약속 이행 중");
+                string previousImpact = ComplaintHistory.PreviousImpact(c, Affected(area,c.Region,c.Reason));
+                if (previousImpact.Length > 0) v.Detail += "\n" + previousImpact;
+                v.Road = Happiness.Reasons[c.Reason] + ": " + CitizenVoice(c) + "\n\n" + v.Road;
                 list.Add(v);
             }
             // Complaints whose resident is still on the way to the office (CivicVisits), listed after filed ones.

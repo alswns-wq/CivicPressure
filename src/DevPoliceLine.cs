@@ -204,17 +204,49 @@ namespace CivicPressure
         }
         private static void DevTakePrisoner(DevCombatant officer,DevCombatant person,int index)
         {
-            officer.Prisoner=index; officer.BoardingAt=-1; officer.ExitRoute=null;
+            officer.Prisoner=index; officer.BoardingAt=-1; officer.ExitRoute=null; officer.EscortDispatch=0;
             person.Detained=true; person.Moving=false; person.Action=0; person.DownUntil=0;
             person.ReactionAt=person.FallAt=-100; person.BoardingAt=-1;
         }
         private void DevReleasePrisoner(DevCombatant officer,UnrestView state)
         {
-            int index=officer.Prisoner; officer.Prisoner=-1; officer.BoardingAt=-1;
+            int index=officer.Prisoner; officer.Prisoner=-1; officer.BoardingAt=-1; officer.EscortDispatch=0;
             if(index<0 || index>=devRioters.Length || devRioters[index]==null) return;
             DevCombatant person=devRioters[index]; person.Detained=false; person.BoardingAt=-1;
             if(!person.Gone && devBattleOutcome>0) DevStartFlee(person,state,index);
             else if(!person.Gone && devBattleOutcome==0) { DevCombatResult.Resolving=false; devNextLinePlan=0; }
+        }
+        private static bool DevAssignEscort(DevCombatant officer,DevRoadRibbon road,DevPoliceUnitView[] units)
+        {
+            if (units == null || road == null) return false;
+            foreach (DevPoliceUnitView unit in units)
+                if (unit != null && unit.Vehicle != 0 && unit.Dispatch == officer.EscortDispatch &&
+                    officer.EscortDispatch != 0 && officer.ExitRoute == road.Points &&
+                    (unit.Position-officer.EscortParkedAt).sqrMagnitude<.0001f && officer.ExitStation<=road.Limit+.5f)
+                    return true;
+            DevPoliceUnitView chosen=null;
+            float best=float.MaxValue;
+            foreach (DevPoliceUnitView unit in units) {
+                if (unit == null || unit.Vehicle == 0 || unit.Dispatch == 0) continue;
+                float station, side; Vector3 forward;
+                road.Project(unit.Position,out station,out side);
+                if (station>road.Limit+.5f) continue;
+                Vector3 point=road.At(station,side,out forward);
+                if ((point-unit.Position).sqrMagnitude>16) continue;
+                // Keep a valid assignment stable; select the nearest reachable parked car only
+                // when custody starts or that car disappears from the simulation snapshot.
+                if (unit.Dispatch == officer.EscortDispatch) { chosen=unit; break; }
+                float distance=(unit.Position-officer.Position).sqrMagnitude;
+                if (distance<best) { best=distance; chosen=unit; }
+            }
+            if (chosen == null) return false;
+            Vector3 exit=road.Constrain(chosen.Position);
+            if (officer.EscortDispatch!=chosen.Dispatch || (officer.EscortExit-exit).sqrMagnitude>.01f) {
+                officer.EscortDispatch=chosen.Dispatch; officer.EscortExit=exit; officer.ExitRoute=null;
+                officer.BoardingAt=-1;
+            }
+            officer.EscortParkedAt=chosen.Position;
+            return true;
         }
         private bool DevEscort(DevCombatant officer,DevRoadRibbon road,float delta)
         {
@@ -225,7 +257,7 @@ namespace CivicPressure
                 return true;
             }
             if(officer.ExitRoute!=road.Points) {
-                road.Project(officer.Exit,out officer.ExitStation,out officer.ExitSide); officer.ExitRoute=road.Points;
+                road.Project(officer.EscortExit,out officer.ExitStation,out officer.ExitSide); officer.ExitRoute=road.Points;
             }
             // A broken road must not leave a captive waiting forever for an unreachable car.
             if(officer.ExitStation>road.Limit+.5f) return false;
@@ -234,11 +266,11 @@ namespace CivicPressure
             DevMoveSlot(person,road,officer.Station,officer.Side+.65f,delta*2.2f);
             person.Aim=officer.Position+officer.Travel;
             devRiotPlaces[officer.Prisoner]=person.Position;
-            if((officer.Position-officer.Exit).sqrMagnitude>4 || (person.Position-officer.Exit).sqrMagnitude>6.25f) return true;
+            if((officer.Position-officer.EscortExit).sqrMagnitude>4 || (person.Position-officer.EscortExit).sqrMagnitude>6.25f) return true;
             if(officer.BoardingAt<0) { officer.BoardingAt=devBattleClock; person.BoardingAt=devBattleClock; }
             if(devBattleClock-officer.BoardingAt>=1.4f) {
                 person.Gone=true; person.Detained=false; person.Moving=false;
-                officer.Prisoner=-1; officer.BoardingAt=-1; officer.ArrestTeam=false; devNextLinePlan=0;
+                officer.Prisoner=-1; officer.BoardingAt=-1; officer.EscortDispatch=0; officer.ArrestTeam=false; devNextLinePlan=0;
             }
             return true;
         }

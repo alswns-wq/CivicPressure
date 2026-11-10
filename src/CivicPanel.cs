@@ -54,9 +54,17 @@ namespace CivicPressure
         private bool showComplaints = true;
         private UIButton complaintsTab, promise, reject, agree, complaintLocation;
         private UIPanel complaintsBody, helpWindow;
+        private UIPanel complaintHelp;
+        private UIButton complaintHelpButton;
+        private int guideKey;
+        private int guideDifficulty;
+        private long guideStamp;
         private UILabel complaintTitle, complaintStage, complaintDetail, complaintRoad, complaintCount, complaintTimer;
         private int complaintIndex;
         private ComplaintView currentComplaint;
+#if DEV
+        private DevAiPanel aiTest = null;
+#endif
         private UIPanel reportWindow, demandWindow, trendWindow;
         private UILabel trendHeading, trendSummary, trendDetails, trendDelta;
         private readonly UITextureSprite[] trendBars = new UITextureSprite[25];
@@ -144,6 +152,14 @@ namespace CivicPressure
             devTools.textScale = .72f;
             devTools.tooltip = "개발자 창 열기/닫기";
             devTools.eventClick += delegate { DevPanel.Toggle(); };
+#if CP_AI_EXPERIMENT
+            // Restore this paused experiment only through an explicit build symbol.
+            Button(this, "AI", 360, 12, 42, 28).eventClick += delegate {
+                if (aiTest == null) { aiTest = (DevAiPanel)GetUIView().AddUIComponent(typeof(DevAiPanel)); aiTest.Initialize(); }
+                else if (aiTest.isVisible) { aiTest.Hide(); return; }
+                aiTest.Select(currentComplaint); aiTest.Show(); aiTest.BringToFront();
+            };
+#endif
 #endif
             Card(this, 22, 194, 616, 4, new Color32(90, 110, 125, 255));
             scoreFill = Card(this, 22, 194, 616, 4, Accent);
@@ -262,7 +278,10 @@ namespace CivicPressure
             Button(complaintsBody, L.T("이전"), 400, 0, 100, 28).eventClick += delegate { complaintIndex--; Render(CivicSimulation.View); };
             Button(complaintsBody, L.T("다음"), 510, 0, 100, 28).eventClick += delegate { complaintIndex++; Render(CivicSimulation.View); };
             complaintStripe = Card(complaintsBody, 0, 47, 4, 117, Accent);
-            complaintTitle = Cell(complaintsBody, "", 10, 45, 600, 28, 1.05f, false);
+            complaintTitle = Cell(complaintsBody, "", 10, 45, 550, 28, 1.05f, false);
+            complaintHelpButton = Button(complaintsBody, "?", 574, 43, 36, 32);
+            complaintHelpButton.tooltip = L.T("발생 이유와 해결 방법");
+            complaintHelpButton.eventClick += delegate { OpenComplaintHelp(); };
             complaintStage = Cell(complaintsBody, "", 10, 77, 600, 24, .88f, false);
             complaintTimer = Cell(complaintsBody, "", 10, 104, 600, 26, 1.08f, false);
             complaintDetail = Cell(complaintsBody, "", 10, 134, 600, 38, .8f, false);
@@ -365,6 +384,7 @@ namespace CivicPressure
             initialized = true;
             Render(CivicSimulation.View);
             Show();
+            UnifiedUIButton.SetPressed(isVisible);
         }
 
         private static UILabel Cell(UIComponent parent, string text, float x, float y, float w, float h, float scale, bool right)
@@ -432,7 +452,7 @@ namespace CivicPressure
                 if (reason >= 8 && reason < 13)
                 {
                     string[] requirements = { L.T("거주 가능한 완공 주택 필요 · 주거 상실은 심각"), L.T("학생을 제외한 청년·성인의 게임 실업 상태 기준 · 상업·공업·사무 수요와는 별개"),
-                        L.T("해당 교육 단계 이수율 40% 이하와 학교 배정 부족을 함께 확인 · 20% 이하는 심각"), L.T("의료 서비스 범위 부족·불량 건물 건강·시민 건강 문제를 함께 확인"),
+                        L.T("해금된 교육단계의 학교 미배정이 3게임 시간 지속 · 기존 주민 학력은 제외"), L.T("의료 서비스 범위 부족·불량 건물 건강·시민 건강 문제를 함께 확인"),
                         L.T("치안 서비스 범위 부족과 건물 범죄 지표 60% 이상을 함께 확인 · 80% 이상은 심각") };
                     for (int col = 0; col < 5; col++) cells[row, col].tooltip += "\n" + requirements[reason - 8];
                 }
@@ -551,6 +571,7 @@ namespace CivicPressure
 
         private void ClosePopup()
         {
+            if (complaintHelp != null) complaintHelp.Hide();
             // Keep a pending selection response from immediately reopening a manually closed popup.
             openedFor = WorldInfoPanel.AnyWorldInfoPanelOpen() ? WorldInfoPanel.GetCurrentInstanceID().Building : observed;
             toolsMenu.Hide();
@@ -579,6 +600,7 @@ namespace CivicPressure
 
         private void Render(CityView view)
         {
+            if (complaintHelp != null && (!showComplaints || showUnrest || editingAdministration)) complaintHelp.Hide();
             bool currentSelection = view.Selected != 0 && view.Selected == observed;
             string regionName = view.Regions[view.SelectedDistrict] == null ? L.T("지역 집계 중") : view.Regions[view.SelectedDistrict].Name;
             hallHeading.text = currentSelection && view.Registered ? view.HallTitle : currentSelection ? L.T("선택한 건물 · 행정청 미지정") : L.T("도시 행정 · ") + view.CityName;
@@ -707,7 +729,10 @@ namespace CivicPressure
             foreach (ComplaintView c in view.Complaints) if (all || c.Region == origin) list.Add(c);
             if (list.Count == 0)
             {
-                currentComplaint = null; complaintCount.text = L.T("접수된 민원 없음");
+                currentComplaint = null; complaintHelpButton.isVisible = false; if (complaintHelp != null) complaintHelp.Hide(); complaintCount.text = L.T("접수된 민원 없음");
+#if DEV
+                if (aiTest != null) aiTest.Select(null);
+#endif
                 complaintTitle.text = L.T("현재 접수된 민원이 없습니다.");
                 complaintTitle.textScale = 1.05f;
                 complaintStripe.color = new Color32(160, 225, 180, 255);
@@ -716,6 +741,12 @@ namespace CivicPressure
             }
             complaintIndex = (complaintIndex % list.Count + list.Count) % list.Count;
             currentComplaint = list[complaintIndex];
+            complaintHelpButton.isVisible = Difficulty.Level < 5;
+            complaintHelpButton.tooltip = L.T(Difficulty.Level == 4 ? "판정 기준" : "발생 이유와 해결 방법");
+            if (complaintHelp != null && (guideKey != currentComplaint.Key || guideStamp != currentComplaint.Stamp || guideDifficulty != Difficulty.Level)) complaintHelp.Hide();
+#if DEV
+            if (aiTest != null) aiTest.Select(currentComplaint);
+#endif
             complaintCount.text = L.T("미해결 민원 ") + list.Count + L.T("건 · ") + (complaintIndex + 1) + "/" + list.Count;
             complaintTitle.text = currentComplaint.Title; complaintTitle.tooltip = currentComplaint.Title;
             complaintStage.text = currentComplaint.Stage;
@@ -750,6 +781,7 @@ namespace CivicPressure
             reject.isEnabled = currentComplaint.CanReject;
             promise.text = currentComplaint.Odd ? L.T("수락 · 검토 접수") : L.T("수락 · 개선 약속");
             reject.tooltip = currentComplaint.Odd ? L.T("불이익 없이 기타 요구를 종결합니다.") : L.T("민원을 종결해도 생활 문제의 행복도 감점은 남습니다.");
+            if (!currentComplaint.Odd) reject.tooltip += " " + L.T("문제가 지속되면 유예기간 이후 다시 접수될 수 있습니다.");
             reject.text = L.T("거절");
             if (currentComplaint.Kind == ComplaintKind.Opposition)
             {
@@ -858,6 +890,7 @@ namespace CivicPressure
                 if(trendWindow!=null && trendWindow.isVisible && box.Overlaps(new Rect(trendWindow.relativePosition.x,trendWindow.relativePosition.y,trendWindow.width,trendWindow.height)))blocked=true;
                 if(demandWindow!=null && demandWindow.isVisible && box.Overlaps(new Rect(demandWindow.relativePosition.x,demandWindow.relativePosition.y,demandWindow.width,demandWindow.height)))blocked=true;
                 if(reportWindow!=null && reportWindow.isVisible && box.Overlaps(new Rect(reportWindow.relativePosition.x,reportWindow.relativePosition.y,reportWindow.width,reportWindow.height)))blocked=true;
+                if(complaintHelp!=null && complaintHelp.isVisible && box.Overlaps(new Rect(complaintHelp.relativePosition.x,complaintHelp.relativePosition.y,complaintHelp.width,complaintHelp.height)))blocked=true;
                 if(helpWindow!=null && helpWindow.isVisible && box.Overlaps(new Rect(helpWindow.relativePosition.x,helpWindow.relativePosition.y,helpWindow.width,helpWindow.height)))blocked=true;
                 for(int j=0;j<occupied;j++)if(box.Overlaps(occupiedPins[j]))blocked=true;
                 if(blocked){if(mapPins[i]!=null)mapPins[i].Hide();continue;}
@@ -1087,6 +1120,63 @@ namespace CivicPressure
             reportPage.text=(reportIndex+1)+" / "+reports.Length+" · "+scope+" · "+limit;
         }
 
+        private void OpenComplaintHelp()
+        {
+            if (currentComplaint == null || Difficulty.Level >= 5) return;
+            if (complaintHelp != null) { UnityEngine.Object.Destroy(complaintHelp.gameObject); complaintHelp = null; }
+            UIView ui = UIView.GetAView();
+            complaintHelp = (UIPanel)ui.AddUIComponent(typeof(UIPanel));
+            complaintHelp.backgroundSprite = "MenuPanel2";
+            complaintHelp.color = new Color32(184, 202, 217, 255);
+            float width = Mathf.Min(560, ui.fixedWidth - 16);
+            complaintHelp.width = width;
+            guideKey = currentComplaint.Key; guideStamp = currentComplaint.Stamp;
+            guideDifficulty = Difficulty.Level;
+            Surface(complaintHelp, 8, 8, width - 16, 40, new Color32(140, 170, 192, 255));
+            Cell(complaintHelp, L.T(guideDifficulty == 4 ? "판정 기준" : "발생 이유와 해결 방법"), 20, 18, width - 76, 26, .95f, false).textColor = Accent;
+            UIDragHandle handle = complaintHelp.AddUIComponent<UIDragHandle>();
+            handle.size = new Vector2(width - 50, 48); handle.target = complaintHelp;
+            Button(complaintHelp, "X", width - 42, 13, 28, 26).eventClick += delegate { complaintHelp.Hide(); };
+            float y = 60;
+            y += GuideParagraph(complaintHelp, currentComplaint.Title, 22, y, width - 44, .9f, Ink) + 14;
+            string[] sections = ComplaintGuide.Sections(currentComplaint);
+            string[] headings = { L.T("판정 기준"), L.T("확인할 해결 방법") };
+            int sectionCount = guideDifficulty == 4 ? 1 : headings.Length;
+            for (int i = 0; i < sections.Length && i < sectionCount; i++) {
+                UIPanel card = complaintHelp.AddUIComponent<UIPanel>();
+                card.relativePosition = new Vector3(14, y); card.width = width - 28;
+                card.backgroundSprite = "MenuPanel2"; card.color = new Color32(150, 181, 201, 255);
+                Color32 tint = i == 0 ? new Color32(255, 215, 155, 255) : Accent;
+                Cell(card, (i + 1).ToString("00") + "  " + headings[i], 14, 12, width - 56, 24, .87f, false).textColor = tint;
+                card.height = 44 + GuideParagraph(card, sections[i], 14, 40, width - 56, .86f, Ink);
+                y += card.height + 10;
+            }
+            if (guideDifficulty < 4)
+                y += GuideParagraph(complaintHelp, L.T("아래는 판정 기준과 점검 방법입니다. 상세 피해와 위치는 민원 본문을 확인하세요. 조치 후 다음 집계를 기다려 주세요."), 22, y + 2, width - 44, .72f, Muted) + 20;
+            else y += 6;
+            complaintHelp.height = y;
+            complaintHelp.relativePosition = new Vector3(Math.Max(0, (ui.fixedWidth - width) / 2), Math.Max(0, (ui.fixedHeight - y) / 2));
+            complaintHelp.BringToFront();
+        }
+
+        private static float GuideParagraph(UIComponent parent, string text, float x, float y, float width, float scale, Color32 color)
+        {
+            UILabel label = parent.AddUIComponent<UILabel>();
+            label.font = UIView.GetAView().defaultFont;
+            label.autoSize = false; label.wordWrap = true;
+            label.textScale = scale; label.textColor = color;
+            float height;
+            using (UIFontRenderer renderer = label.font.ObtainRenderer()) {
+                renderer.textScale = scale; renderer.pixelRatio = 1f;
+                renderer.wordWrap = true; renderer.multiLine = true;
+                renderer.maxSize = new Vector2(width, 10000);
+                height = Mathf.Ceil(renderer.MeasureString(text).y) + 8;
+            }
+            label.size = new Vector2(width, height); label.relativePosition = new Vector3(x, y);
+            label.text = text;
+            return height;
+        }
+
         private void OpenHelp()
         {
             if (helpWindow != null) { helpWindow.isVisible = !helpWindow.isVisible; return; }
@@ -1100,7 +1190,7 @@ namespace CivicPressure
             UIDragHandle handle = helpWindow.AddUIComponent<UIDragHandle>(); handle.size = new Vector2(580, 48); handle.target = helpWindow;
             Button(helpWindow, "X", 590, 12, 30, 28).eventClick += delegate { helpWindow.Hide(); };
             string[] helpPages = {
-                L.T("건물 상태 · 민원 기준\n\n도로의 서비스 범위 대신 건물 상태의 계산값을 사용합니다.\n불량 방향 60%부터 경고, 80%부터 심각입니다.\n중간색과 양호 상태는 이번 항목의 피해로 세지 않습니다.\n\n건강: 건물 평균 건강 50 이하 / 심각 25 이하\n범죄: 건물 범죄 지표 60% 이상 / 심각 80% 이상\n쓰레기: 적체량 3,000 이상 / 심각 4,000 이상\n소방: 건물 안전 지표 40 이하 / 심각 20 이하\n실제 화재는 안전 지표와 관계없이 심각입니다.\n\n교육: 해당 단계 이수율 40% 이하이고 학교 배정도 부족할 때.\n이수율 20% 이하는 심각이며, 유효한 재학생은 제외합니다.\n의료·치안 서비스 부족은 불량 건물 상태도 함께 요구합니다.\n미해금 서비스 부족은 제외하고, 구별 피해를 집계합니다.\n\n60%·80%는 모드의 기준이며 게임의 공식 경고선은 아닙니다.\n테마·모드에 따라 실제 색조는 다를 수 있습니다.\n건설 후 상태 갱신과 다음 집계까지 기다려 주세요."),
+                L.T("민원 판정 · 현재 상태\n\n학교 미배정: 해금된 교육단계의 취학 대상이 학교에 배정되지 않은 상태를 3게임 시간 관찰합니다. 기존 주민의 학력은 제외합니다.\n\n거주 가능한 집 부족: 집이 없거나 거주 불가 상태가 3게임 시간 지속된 시민을 집계합니다. 빈 폐건물 수가 아닙니다.\n\n문제가 해소되면 관찰을 초기화합니다. 도시를 다시 불러오면 관찰을 다시 시작합니다. 이후 구별 피해율과 난이도별 접수 대기도 적용합니다.\n\n소방 범위 안에서는 위험만으로 민원을 만들지 않습니다. 실제 화재는 별도 집계합니다. 범죄·치료 대기도 3게임 시간 관찰하며 치료 중인 시민은 제외합니다."),
                 L.T("시작하기 · 시청과 구청 지정\n\n시청과 구청은 각각 별도 건물로 지정하는 것을 권장합니다.\n같은 건물에 역할을 겹치면 구청 농성과 시청 이관의 구분이\n불편할 수 있습니다. 이미 겸용 중이라면 별도 건물을 마련한 뒤\n‘행정청 변경’에서 지정 상태를 정리해 주세요.\n\n시청은 도시 전체의 행정을, 구청은 해당 일반 지구의 민원을\n담당합니다. 건물을 선택하고 ‘시청으로 지정’ 또는\n‘구청으로 지정’을 누른 뒤 상단의 지정 현황을 확인하세요.\n\n구청을 지정하지 않은 지역과 일반 지구 밖의 민원은\n시청이 직접 담당합니다. 지구 경계를 바꾸거나 행정청을\n철거했다면 지정 현황도 다시 확인하는 것이 좋습니다.\n\n권장 순서\n① 시청 지정 → ② 일반 지구 확인 → ③ 구별 구청 지정\n④ 도시를 잠시 진행해 집계 완료 → ⑤ 민원·행복도 확인"),
                 L.T("도시 행정 창 · 화면 읽는 순서\n\n기본 단축키 Ctrl+/로 창을 열고 닫습니다.\n단축키는 모드 옵션에서 변경할 수 있습니다.\n지정한 행정청 건물을 클릭해서 창을 열 수도 있습니다.\n\n상단에서는 선택한 행정청과 도시·지구 행복도를 확인합니다.\n‘시 전체 / 이전 구 / 다음 구’로 조회 범위를 바꾸세요.\n하단의 ‘민원 / 행복도 / 시위·폭동’은 서로 다른 화면입니다.\n\n민원: 담당 지역, 처리 단계, 남은 시간, 피해 인원과 기준\n행복도: 분야별 경고·심각 인원, 피해 비율과 감점\n시위·폭동: 진행 단계, 요구 개선, 현장·경찰차 이동과 출동\n\n‘다시 집계’는 새로운 조사를 요청하는 기능입니다.\n누른 즉시 결과가 바뀌는 것은 아니므로 집계 완료를 기다리세요.\n도움말은 이 별도 창에서 이전·다음으로 읽을 수 있습니다."),
                 L.T("행복도 · 5단계와 감점\n\n행복도는 0~100점이며 단계는 다음과 같습니다.\n0~20 미만: 최악 / 20~40 미만: 나쁨\n40~60 미만: 보통 / 60~80 미만: 좋음 / 80~100: 만족\n\n도시 점수는 집계 가능한 일반 지구 점수의 산술평균입니다.\n인구가 많은 구에 더 큰 비중을 두는 평균은 아닙니다.\n해당 지구가 없으면 전체 시민 집계를 사용합니다.\n\n피해가 넓게 퍼질수록 감점이 커집니다. 심각 피해는 1.5배로\n반영하며, 같은 시민의 같은 사유는 중복해서 세지 않습니다.\n소수의 잔여 피해는 고정 감점을 비율에 따라 줄입니다.\n버려진 건물은 별도 감점이 있으므로 복구도 확인하세요.\n\n게임의 평균 건강은 시민의 건강 상태를, 이 모드의 행복도는\n주거·교통·치안 등 여러 생활 여건을 함께 나타냅니다.\n‘추이 보기’에서는 최근 24게임 시간의 변화를 확인합니다.\n난이도를 바꾸거나 인구와 지구 경계가 달라지면 행복도에도 반영됩니다."),
@@ -1137,9 +1227,13 @@ namespace CivicPressure
         public override void OnDestroy()
         {
             initialized = false;
+#if DEV
+            if (aiTest != null) UnityEngine.Object.Destroy(aiTest.gameObject);
+#endif
             if (flatTexture != null) UnityEngine.Object.Destroy(flatTexture);
             if (floatingButton != null) UnityEngine.Object.Destroy(floatingButton.gameObject);
             if (helpWindow != null) UnityEngine.Object.Destroy(helpWindow.gameObject);
+            if (complaintHelp != null) UnityEngine.Object.Destroy(complaintHelp.gameObject);
             if (reportWindow != null) UnityEngine.Object.Destroy(reportWindow.gameObject);
             if (demandWindow != null) UnityEngine.Object.Destroy(demandWindow.gameObject);
             if (trendWindow != null) UnityEngine.Object.Destroy(trendWindow.gameObject);

@@ -20,6 +20,7 @@ namespace CivicPressure
         private static UIComponent advancedPanel;
         private static UILabel levelRules;
         private static UIDropDown levelDrop;
+        private static bool restoringLevel;
         private static readonly string[] NamesSource = { "끔", "낮음 (0.5배)", "기본 (1배)", "높음 (2배)", "매우 높음 (5배)" };
         private static string[] Names { get { return L.Array(NamesSource); } }
         private static readonly double[] Multipliers = { 0, 0.5, 1, 2, 5 };
@@ -71,8 +72,13 @@ namespace CivicPressure
             Initialize();
             UIHelperBase levels = helper.AddGroup(L.T("도시 운영 난이도 · 1 여유 / 3 기준 / 5 극한"));
             levelDrop = levels.AddDropdown(L.T("난이도"), new string[] { L.T("1 · 여유"), L.T("2 · 쉬움"), L.T("3 · 기준"), L.T("4 · 어려움"), L.T("5 · 극한") }, Difficulty.Level - 1, delegate(int index) {
+                if (restoringLevel) return;
                 // Difficulty 5 turns on its own rules, so it asks first and goes back when refused.
-                if (index + 1 == 5 && difficulty.value != 5) { NoticePanel.Ask(L.T("경고 · 5단계는 극한 모드입니다"), ExtremeWarning(), L.T("5단계로 설정"), L.T("취소"), delegate { ChooseLevel(5); }, delegate { if (levelDrop != null) levelDrop.selectedIndex = difficulty.value - 1; }); return; }
+                if (index + 1 == 5 && difficulty.value != 5) { NoticePanel.Ask(L.T("경고 · 5단계는 극한 모드입니다"), ExtremeWarning(), L.T("5단계로 설정"), L.T("취소"), delegate { ChooseLevel(5); }, delegate {
+                    restoringLevel = true;
+                    try { if (levelDrop != null) levelDrop.selectedIndex = difficulty.value - 1; }
+                    finally { restoringLevel = false; }
+                }); return; }
                 ChooseLevel(index + 1);
             }) as UIDropDown;
             levelRules = Caption(levels, LevelRules());
@@ -97,6 +103,13 @@ namespace CivicPressure
             if (advancedPanel != null) advancedPanel.isVisible = custom.value;
             UIHelperBase group = helper.AddGroup(L.T("시위·폭동 발생 빈도 (클릭하여 변경)"));
             Add(group, protest, L.T("시위 발생")); Add(group, riot, L.T("폭동 전환"));
+            group.AddButton(L.T("시위·폭동 강제종료"), delegate {
+                UnrestEvent incident=CivicUnrest.IncidentForRecovery;
+                if (incident==null) return;
+                ConfirmPanel.ShowModal(L.T("시위·폭동 강제종료"),
+                    L.T("오류 복구용 기능입니다. 예기치 않은 문제가 생길 수 있으니 정상 진행 중에는 사용을 권장하지 않습니다."),
+                    delegate(UIComponent component,int result) { if(result==1) CivicUnrest.RequestEnd(incident); });
+            });
             // Subscriber feedback 3: optional events.
             UIHelperBase events = helper.AddGroup(L.T("이벤트 켜기·끄기"));
             events.AddCheckbox(L.T("황당 민원 (엉뚱한 요청)"), oddRequests.value, delegate(bool on) { oddRequests.value = on; GameSettings.SaveAll(); Apply(); });

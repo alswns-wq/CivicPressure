@@ -194,6 +194,11 @@ namespace CivicPressure
             {
                 hooks = new Harmony("CivicPressure.DevVehicleAssault");
                 patchedMethods.Clear();
+                // Install the save boundary before enabling any native vehicle mutation.
+                Type saveData = typeof(SimulationManager).GetNestedType("Data", BindingFlags.Public | BindingFlags.NonPublic);
+                MethodInfo serialize = saveData == null ? null : saveData.GetMethod("Serialize", BindingFlags.Public | BindingFlags.Instance);
+                if (serialize == null) throw new MissingMethodException("SimulationManager.Data.Serialize");
+                hooks.Patch(serialize, new HarmonyMethod(typeof(DevVehicleAssault).GetMethod("BeforeSave", BindingFlags.Static | BindingFlags.NonPublic)), null, null, null);
                 foreach(Type ai in typeof(CarAI).Assembly.GetTypes()) if(DevVehicleAssaultRules.RoadVehicle(ai)) {
                     Patch(ai, "SimulationStep", new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vector3) }, "Hold", false);
                     Patch(ai, "CalculateTargetSpeed", new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(float), typeof(float) }, "Slow", true);
@@ -256,6 +261,45 @@ namespace CivicPressure
         }
 #endif
         internal static void RequestClear() { Interlocked.Exchange(ref clearRequested, 1); }
+        private static void BeforeSave()
+        {
+            lock (Gate)
+            {
+                if (!ready) return;
+                Interlocked.Exchange(ref pending, null);
+                VehicleManager manager = Singleton<VehicleManager>.instance;
+                CitizenManager citizens = Singleton<CitizenManager>.instance;
+                // Validate every affected occupant chain before releasing anything. Unknown or occupied
+                // native state must fail the save, not silently lose CP ownership of a held vehicle.
+                foreach (DevVehicleAssault job in jobs)
+                    if (job.vehicle != 0 && !job.driving && job.Matches(job.vehicle, manager.m_vehicles.m_buffer[job.vehicle]))
+                        RequireEmpty(job.vehicle, job.units, citizens);
+                foreach (KeyValuePair<ushort, Wreck> item in wrecks)
+                    if (WreckMatches(item.Value, manager.m_vehicles.m_buffer[item.Key])) RequireEmpty(item.Key, item.Value.Units, citizens);
+                foreach (DevVehicleAssault job in jobs)
+                {
+                    ushort id = job.vehicle;
+                    if (id == 0) continue;
+                    if (job.driving || !job.Matches(id, manager.m_vehicles.m_buffer[id])) { job.Forget("Save: native vehicle released from attack tracking"); continue; }
+                    job.RestoreUnattackedParked(manager.m_vehicles.m_buffer[id].Info);
+                    manager.ReleaseVehicle(id);
+                    job.Forget("Save: empty damaged vehicle cleared");
+                }
+                ushort[] ids = new ushort[wrecks.Count]; wrecks.Keys.CopyTo(ids, 0);
+                foreach (ushort id in ids) {
+                    Wreck wreck = wrecks[id];
+                    if (WreckMatches(wreck, manager.m_vehicles.m_buffer[id])) manager.ReleaseVehicle(id);
+                    RemoveWreck(id);
+                }
+            }
+        }
+        private static void RequireEmpty(ushort id, uint units, CitizenManager citizens)
+        {
+            uint[] occupants = DevVehicleAssaultRules.Manifest(id, units, citizens.m_units.m_buffer,
+                citizens.m_citizens.m_buffer, citizens.m_instances.m_buffer);
+            if (occupants == null || occupants.Length != 0)
+                throw new InvalidOperationException("[CivicPressure] Save stopped: damaged vehicle " + id + " has an occupied or invalid passenger chain. No passengers were removed.");
+        }
         internal static void VisualFailure() { visualFailed = true; RequestClear(); }
         internal static void ActorsReady(int token) { foreach(DevVehicleAssault job in jobs) if(job.assaultToken==token) job.actorsReadyToken=token; }
         private void ResetArrival()

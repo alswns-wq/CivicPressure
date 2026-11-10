@@ -109,6 +109,7 @@ namespace CivicPressure
         private ushort wideChoice;
         private int candidates, wideCandidates;
         private readonly ushort fixedStart;
+        private readonly ushort excludedRoad;
         internal bool Done;
         internal UnrestEvent Result;
 
@@ -116,7 +117,11 @@ namespace CivicPressure
             : this(region, building, rng, 0) { }
 
         internal MarchSearch(int region, ushort building, System.Random rng, ushort startNode)
+            : this(region, building, rng, startNode, 0) { }
+
+        internal MarchSearch(int region, ushort building, System.Random rng, ushort startNode, ushort exclude)
         {
+            excludedRoad = exclude;
             fixedStart = startNode;
             origin = region; hall = building; random = rng;
             NetNode[] nodes = Singleton<NetManager>.instance.m_nodes.m_buffer;
@@ -151,7 +156,7 @@ namespace CivicPressure
                 for (int slot = 0; slot < 8; slot++)
                 {
                     ushort roadId = net.m_nodes.m_buffer[node].GetSegment(slot);
-                    if (roadId == hallRoad || !UnrestRoads.Walkable(roadId)) continue;
+                    if (roadId == hallRoad || roadId == excludedRoad || !UnrestRoads.Walkable(roadId)) continue;
                     NetSegment road = net.m_segments.m_buffer[roadId];
                     ushort other = road.m_startNode == node ? road.m_endNode : road.m_startNode;
                     if (other == 0 || other >= parents.Length || parents[other] != 0) continue;

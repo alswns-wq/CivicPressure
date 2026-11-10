@@ -139,10 +139,11 @@ namespace CivicPressure
         private void DevAdvanceWalkers(UnrestView state, float delta)
         {
             DevRoadRibbon ribbon = state.DevRoad;
-            if (!state.Riot || ribbon == null) return;
+            if (!state.Riot) return;
             double hours = devWalkMotion.Follow(state.VisualClock / (double)GameClock.HourTicks, Time.unscaledDeltaTime, delta <= 0);
             float meters = !devWalkStarted ? 0 : (float)Math.Max(0, Math.Min(1, hours - devWalkHours)) * UnrestRules.Speed(true);
             devWalkHours = hours; devWalkStarted = true;
+            if (ribbon == null || !state.RouteValid) return;
             bool changed = devWalkRoute != ribbon.Points; devWalkRoute = ribbon.Points;
             DevAssaultView assault = DevVehicleAssault.View;
             for (int index = 0; index < 88; index++)

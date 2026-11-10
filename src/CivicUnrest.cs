@@ -27,6 +27,7 @@ namespace CivicPressure
     {
         internal long VisualClock;
         internal bool Active, Riot, Police;
+        internal bool RouteValid;
         internal bool Announced;
         internal string Announcement;
         internal bool Manual, Elapsed, Resolved, Rebuilt;
@@ -63,6 +64,7 @@ namespace CivicPressure
                 previousTime = GameClock.Rebase(previousTime, now, factor);
                 nextOnward = GameClock.Rebase(nextOnward, now, factor);
                 nextDispatch = GameClock.Rebase(nextDispatch, now, factor);
+                nextRecovery = GameClock.Rebase(nextRecovery, now, factor);
             }
         }
         private static readonly object Gate = new object();
@@ -138,6 +140,7 @@ namespace CivicPressure
         {
             lock (Gate)
             {
+                ClearRecovery(); endRequested=null;
                 enabled = false; state = new UnrestState(); search = null; onward = null; nextOnward = 0; preserved = null;
                 manualRequest = 0; manualSearch = false; riotSearch = false; meetingTarget=null;
                 previousTime = 0; nextDispatch = 0; policeTarget = 0; dispatch = false; repairs = 0;
@@ -168,7 +171,7 @@ namespace CivicPressure
         }
         internal static byte[] Save() { lock (Gate) return preserved ?? UnrestSave.Encode(state); }
 
-        internal static void VehicleReleased(ushort id) { lock (Gate) { PoliceDeployment.Released(id); if (policeVehicle == id) policeVehicle = 0; } }
+        internal static void VehicleReleased(ushort id) { lock (Gate) { DevCasualties.Released(id); PoliceDeployment.Released(id); if (policeVehicle == id) policeVehicle = 0; } }
 
         internal static void PoliceArrived(ushort vehicle, ushort target, Vector3 vehiclePosition)
         {
@@ -249,7 +252,7 @@ namespace CivicPressure
         {
             lock (Gate)
             {
-                if (!enabled) return;
+                if (!enabled && endRequested==null) return;
                 if (preserved != null) { view = new UnrestView { Text = L.T("시위 저장 데이터 해석 실패: 원본 보존 중, 새 시위는 중지되었습니다.") }; return; }
                 try { Step(city, now); TrafficRouting.Tick(); }
                 catch (Exception error)
@@ -271,6 +274,10 @@ namespace CivicPressure
 #if DEV
             if (DevEnd) { DevEnd = false; DevForceEnd(city, now); }
 #endif
+            if (endRequested != null) {
+                UnrestEvent requested=endRequested; endRequested=null;
+                if (object.ReferenceEquals(requested,state.Event)) { EndCurrentIncident(city,now); return; }
+            }
             double hours = previousTime == 0 ? 0 : Math.Max(0, Math.Min(1, (now.Ticks - previousTime) / (double)GameClock.HourTicks));
             previousTime = now.Ticks;
             bool hourly = hours > 0 && now.Ticks >= state.NextCheck;
@@ -282,6 +289,7 @@ namespace CivicPressure
                 // so a road repaired behind the crowd cannot invalidate the route afterwards.
                 if (e.Leg > 0 && passedRoad == 0) { passedRoad = e.Roads[e.Leg - 1]; passedIndex = e.RoadIndices[e.Leg - 1]; }
                 UnrestRoads.Anchor(e);
+                RecoverRoute(e,now);
                 CivicRecords.Observe(e, city, now);
             }
             if (e != null && e.DeployedVehicle != 0)
@@ -416,7 +424,7 @@ namespace CivicPressure
             {
                 position = current;
                 NetSegment[] roads = Singleton<NetManager>.instance.m_segments.m_buffer;
-                if (!e.Arrived && !e.Police && !transfer && hours > 0 && (roads[roadId].m_flags & NetSegment.Flags.Collapsed) == 0)
+                if (!e.Arrived && !e.Police && !transfer && recoverySearch==null && hours > 0 && (roads[roadId].m_flags & NetSegment.Flags.Collapsed) == 0)
                 {
                     float remaining = (float)hours * UnrestRules.Speed(e.Riot);
                     if(e.Riot) {
@@ -465,9 +473,7 @@ namespace CivicPressure
             }
             PublishClosure(e);
             e.X = position.x; e.Y = position.y; e.Z = position.z;
-            if (!routeValid) message = closure != null
-                ? L.T("도로가 교체되어 행진을 중단했습니다. 현재 위치의 교통 통제와 해산 조건은 유지됩니다.")
-                : L.T("도로가 교체되어 행진을 중단했습니다. 해산 조건은 유지됩니다.");
+            if (!routeValid) message = L.T("행진 경로를 확인할 수 없어 대기 중입니다. 도로 변경·연결 상태를 확인하세요.");
 
             // Disband before escalation: a protest whose demands were met cannot become a riot that tick.
             DevCombatResult combat=DevCombatResult.Current;
@@ -534,7 +540,8 @@ namespace CivicPressure
                 DevPoliceUnits = PoliceDeployment.DevArrived(e),
                 DevSupportStamp = devArmedStamp,
                 DevEscapeDoors = DevDoors(e),
-                DevRoad = routeValid ? DevRoadCorridor.Make(e, position) : null,
+                RouteValid = routeValid && recoverySearch==null,
+                DevRoad = routeValid ? DevRoadCorridor.Make(e, position) : DevRoadCorridor.Last(e, position),
                 PoliceVehicle = policeVehicle, PolicePosition = policePosition, PoliceCount = e.DeployedVehicle == 0 ? 0 : 1 + e.Support.Length,
                 SuppressionMinutes = e.Police ? Math.Max(0, 30 - (now.Ticks - e.PoliceAt) / (double)GameClock.MinuteTicks) : 30,
                 Manual = e.Manual, Elapsed = elapsed, Resolved = resolved, Rebuilt = RepairsComplete(e), Repairs = repairs, LocalStage = localStage,

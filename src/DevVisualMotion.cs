@@ -21,6 +21,8 @@ namespace CivicPressure
         { return float.IsNaN(delta) || float.IsInfinity(delta) || delta <= 0 ? 0 : (float)(1 - Math.Exp(-Math.Min(.2f, delta) * response)); }
         internal static float FrameDelta(float delta, bool paused)
         { return paused || float.IsNaN(delta) || float.IsInfinity(delta) ? 0 : Math.Max(0, Math.Min(.2f, delta)); }
+        internal static float Gait(float current, bool moving, float delta)
+        { return current + ((moving ? 1 : 0) - current) * Blend(delta, moving ? 12 : 16); }
         internal static Vector3 LookDirection(Vector3 travel,bool moving,Vector3 aim)
         {
             travel.y=aim.y=0;
@@ -31,6 +33,8 @@ namespace CivicPressure
         internal static float Interval(float distanceSquared) { return distanceSquared <= 250 * 250 ? 0 : 1f / 15f; }
         internal static float BoneInterval(float distanceSquared)
         { return distanceSquared<=60*60 ? 1f/20 : distanceSquared<=250*250 ? 1f/12 : 1f/5; }
+        internal static float PoseBlend(float age,float interval)
+        { return interval<=0 ? 1 : Math.Max(0,Math.Min(1,age/interval)); }
         internal static float NextBone(float now,float deadline,float interval)
         {
             float next=deadline+(float)(Math.Floor(Math.Max(0,now-deadline)/interval)+1)*interval;

@@ -105,6 +105,10 @@ namespace CivicPressure
             }
             return snapshot;
         }
+        // Render/battle snapshot only. Never use this to advance native march or damage.
+        internal static void Invalidate() { incident=null; cached=null; route=null; planned=null; plannedIndices=null; }
+        internal static DevRoadRibbon Last(UnrestEvent e, Vector3 position)
+        { return incident == e && cached != null ? cached.WithFront(position) : null; }
         internal static bool Suffix(ushort[] roads, uint[] indices, ushort[] full, uint[] fullIndices)
         {
             if (full == null || fullIndices == null || roads.Length > full.Length || roads.Length != indices.Length || full.Length != fullIndices.Length) return false;

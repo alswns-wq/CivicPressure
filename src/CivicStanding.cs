@@ -230,7 +230,7 @@ namespace CivicPressure
             Review r = StandingRules.Evaluate(period, now);
             reviews.Add(r);
             while (reviews.Count > StandingRules.MaxReviews) reviews.RemoveAt(0);
-            period = new ReviewPeriod { Started = now };
+            period = StandingRules.NextPeriod(period, now);
             // Short notice only; the details are in the review window ("평가" button in the administration panel).
             UnseenGrade = r.Grade;
             CivicChirper.PostText(L.T("지난 7일 행정 평가: ") + r.Grade + " (" + r.Score.ToString("0") + L.T("점). 자세한 내용은 도시 행정 창의 '평가'에서 확인할 수 있습니다. #행정평가"));
@@ -702,7 +702,7 @@ namespace CivicPressure
         private static void Enforce(CityView city, Opposition o, long now, bool broken)
         {
             o.State = (int)OppositionState.Enforced; o.Closed = now;
-            period.Enforced++;
+            StandingRules.RecordEnforcement(period, o);
             CivicRecords.ChangeTrust(o.Region, StandingRules.EnforceTrust);
             Enforcement kind = StandingRules.Enforce(o.Kind, Difficulty.Level);
             // Protests switched off in the options: the district is only disappointed.
@@ -896,7 +896,7 @@ namespace CivicPressure
                 return;
             }
             economy.FetchResource(EconomyManager.Resource.Construction, cents, ItemClass.Service.Beautification, ItemClass.SubService.None, ItemClass.Level.Level1);
-            if (notice) period.Enforced = Math.Max(0, period.Enforced - 1);
+            if (notice) StandingRules.CancelEnforcement(period, o);
             o.State = (int)OppositionState.Compensated; o.NoticeDue = 0; o.Closed = t;
             CivicRecords.ChangeTrust(o.Region, StandingRules.CompensateTrust);
             CivicChirper.PostComplaint(Area(city, o.Region) + " · " + KindName(o.Kind) + (notice

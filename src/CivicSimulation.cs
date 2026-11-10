@@ -181,6 +181,7 @@ namespace CivicPressure
             {
                 active = false;
                 GameClock.Reset();
+                CityCensus.CrimeWait.Clear(); CityCensus.MedicalWait.Clear(); CityCensus.EducationWait.Clear(); CityCensus.HousingWait.Clear();
                 citySession = false;
                 CivicUnrest.Reset();
                 CivicComplaints.Reset(); nextComplaints = 0; promiseKey = -1;
@@ -257,6 +258,8 @@ namespace CivicPressure
                     if (!GameClock.Available) return;
                     double clockFactor = GameClock.Synchronize(simulation.m_timePerFrame.Ticks, SimulationManager.DAYTIME_FRAMES);
                     if (clockFactor != 1) {
+                        CityCensus.CrimeWait.Rebase(now.Ticks, clockFactor);
+                        CityCensus.MedicalWait.Rebase(now.Ticks, clockFactor); CityCensus.EducationWait.Rebase(now.Ticks, clockFactor); CityCensus.HousingWait.Rebase(now.Ticks, clockFactor);
                         CivicComplaints.Rebase(now.Ticks, clockFactor);
                         CivicRecords.Rebase(now.Ticks, clockFactor);
                         ComplaintRecurrence.Rebase(now.Ticks, clockFactor);

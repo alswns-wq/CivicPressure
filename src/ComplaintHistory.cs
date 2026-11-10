@@ -28,6 +28,14 @@ namespace CivicPressure
             if (entries.Count > 100) entries.RemoveAt(100);
         }
         internal static void SeedRecurrence() { foreach(ComplaintOutcome e in entries) ComplaintRecurrence.Seed(e.Region,e.Reason,e.Ended); }
+        internal static string PreviousImpact(ComplaintRecord c, int affected)
+        {
+            if (preserved != null || ComplaintRecurrence.Badge(c).Length == 0) return "";
+            foreach (ComplaintOutcome e in entries)
+                if (e.Region == c.Region && e.Reason == c.Reason && e.Ended < c.Since)
+                    return L.T("이전 종결 당시 피해 / 현재 피해: ") + e.Remaining.ToString("N0") + " / " + affected.ToString("N0") + L.T("명");
+            return "";
+        }
         private static string Short(string s) { return string.IsNullOrEmpty(s) ? L.T("미지정") : s.Length > 160 ? s.Substring(0, 160) : s; }
         internal static string[] Pages(int region)
         {

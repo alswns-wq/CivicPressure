@@ -25,6 +25,7 @@ namespace CivicPressure
         internal uint BuildIndex;
         internal int Kind, Region, Homes, State;
         internal long Started, Deadline, NoticeDue, Closed;
+        internal long EnforcedPeriod; // v6: 0 means unknown (legacy), never guessed from intake time.
         internal float X, Z;
         internal bool Riot;
         // Airports DLC: the airport area (park) this opposition is about; 0 for a single building.
@@ -48,6 +49,7 @@ namespace CivicPressure
     // Counters for the review period in progress.
     internal sealed class ReviewPeriod
     {
+        internal long Id = 1; // Stable across time-scale changes; advances only after a review.
         internal long Started;
         internal int Opened, Resolved, Missed, Protests, Riots, Enforced, SuggestionsKept, SuggestionsBroken;
         internal double ScoreSum, TrustSum;
@@ -64,6 +66,18 @@ namespace CivicPressure
 
     internal static class StandingRules
     {
+        internal static void RecordEnforcement(ReviewPeriod period, Opposition opposition)
+        { period.Enforced++; opposition.EnforcedPeriod = period.Id; }
+
+        internal static void CancelEnforcement(ReviewPeriod period, Opposition opposition)
+        {
+            if (opposition.EnforcedPeriod == period.Id) period.Enforced = Math.Max(0, period.Enforced - 1);
+            opposition.EnforcedPeriod = 0;
+        }
+
+        internal static ReviewPeriod NextPeriod(ReviewPeriod period, long now)
+        { return new ReviewPeriod { Started = now, Id = checked(period.Id + 1) }; }
+
         // ---- Trust effects (user choices: fewer protests, more response time, happiness bonus) ----
         // Trust 0 → x1.5 protest chance, 50 → x1.0, 100 → x0.5.
         internal static double ProtestFactor(int trust) { return 1.5 - Clamp(trust) / 100.0; }
@@ -271,7 +285,7 @@ namespace CivicPressure
     {
         internal const string Key = "CivicPressure.Standing";
         private const int Magic = 0x43505354;
-        internal const int Version = 5;
+        internal const int Version = 6;
 
         internal static byte[] Encode(ReviewPeriod period, List<Review> reviews, List<Opposition> oppositions, List<Suggestion> suggestions)
         {
@@ -287,6 +301,7 @@ namespace CivicPressure
                 w.Write(Magic); w.Write(version);
                 w.Write(period.Started); w.Write(period.Opened); w.Write(period.Resolved); w.Write(period.Missed); w.Write(period.Protests); w.Write(period.Riots);
                 w.Write(period.Enforced); w.Write(period.SuggestionsKept); w.Write(period.SuggestionsBroken); w.Write(period.ScoreSum); w.Write(period.TrustSum); w.Write(period.Samples);
+                if (version >= 6) w.Write(period.Id);
                 w.Write(reviews.Count);
                 foreach (Review r in reviews)
                 {
@@ -300,6 +315,7 @@ namespace CivicPressure
                     w.Write(o.Started); w.Write(o.Deadline); w.Write(o.NoticeDue); w.Write(o.Closed); w.Write(o.X); w.Write(o.Z); w.Write(o.Riot); if (version >= 2) w.Write(o.Park);
                     if (version >= 3) { w.Write((byte)o.Condition); w.Write(o.Baseline); w.Write(o.Needed); }
                     if (version >= 4) w.Write(o.Road);
+                    if (version >= 6) w.Write(o.EnforcedPeriod);
                 }
                 w.Write(suggestions.Count);
                 foreach (Suggestion s in suggestions)
@@ -325,6 +341,10 @@ namespace CivicPressure
                 period.Protests = Count(r.ReadInt32()); period.Riots = Count(r.ReadInt32()); period.Enforced = Count(r.ReadInt32());
                 period.SuggestionsKept = Count(r.ReadInt32()); period.SuggestionsBroken = Count(r.ReadInt32());
                 period.ScoreSum = Finite(r.ReadDouble()); period.TrustSum = Finite(r.ReadDouble()); period.Samples = Count(r.ReadInt32());
+                if (version >= 6) {
+                    period.Id = r.ReadInt64();
+                    if (period.Id < 1 || period.Id == long.MaxValue) throw new InvalidDataException("Invalid review period identity");
+                }
                 int n = r.ReadInt32();
                 if (n < 0 || n > StandingRules.MaxReviews) throw new InvalidDataException("Invalid review count");
                 for (int i = 0; i < n; i++)
@@ -344,6 +364,10 @@ namespace CivicPressure
                         X = r.ReadSingle(), Z = r.ReadSingle(), Riot = r.ReadBoolean(), Park = version >= 2 ? r.ReadByte() : (byte)0 };
                     if (version >= 3) { o.Condition = r.ReadByte(); o.Baseline = Count(r.ReadInt32()); o.Needed = Count(r.ReadInt32()); }
                     if (version >= 4) o.Road = r.ReadBoolean();
+                    if (version >= 6) {
+                        o.EnforcedPeriod = r.ReadInt64();
+                        if (o.EnforcedPeriod < 0 || o.EnforcedPeriod > period.Id) throw new InvalidDataException("Invalid enforcement period identity");
+                    }
                     if (o.Kind <= 0 || o.Kind > (version >= 5 ? 11 : version >= 4 ? 10 : 9) || o.Region < 0 || o.Region > 255 || o.State < 0 || o.State > (version >= 3 ? 5 : 3) || o.Condition > (version >= 5 ? 4 : 3) || float.IsNaN(o.X) || float.IsNaN(o.Z))
                         throw new InvalidDataException("Invalid opposition");
                     oppositions.Add(o);

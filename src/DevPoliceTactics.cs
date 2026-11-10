@@ -11,6 +11,8 @@ namespace CivicPressure
         internal int Slot, Side, Retries, NoProgress;
         internal float BestDistance=float.MaxValue;
         internal bool Parked;
+        internal bool RetryPath;
+        internal int PathFailures;
     }
     internal static partial class PoliceDeployment
     {
@@ -21,6 +23,37 @@ namespace CivicPressure
         { DevPoliceParking place; return devTargetEvent==current && devTargets.TryGetValue(id,out place) && place.Parked; }
         internal static int DevSide(ushort id)
         { DevPoliceParking place; return devTargets.TryGetValue(id,out place) ? place.Side : -1; }
+        internal static bool TravelPathFailed(ushort id, ref Vehicle car)
+        {
+            if (current == null || !Owns(id)) return false;
+            PoliceUnit owned = null;
+            foreach (PoliceUnit unit in Units(current)) if (unit.Vehicle == id) { owned = unit; break; }
+            if (owned == null || !Valid(current, owned)) return false;
+            if (!devTargets.ContainsKey(id)) DevAssignTarget(id);
+            DevPoliceParking place = devTargets[id];
+            if (place.RetryPath) return true;
+            if (++place.PathFailures > 3) {
+                Debug.LogWarning("[CivicPressure] Convoy route failed repeatedly; returning vehicle=" + id);
+                Released(id); Return(id);
+                return true;
+            }
+            place.RetryPath = true;
+            place.Parked = false;
+            place.Retries++;
+            place.Target = DevCalculateTarget(id);
+            car.m_blockCounter = 0;
+            car.m_waitCounter = 0;
+            car.m_flags |= Vehicle.Flags.Emergency2;
+            Debug.LogWarning("[CivicPressure] Convoy travel retry: vehicle=" + id + ", attempt=" + place.PathFailures);
+            return true;
+        }
+        internal static bool TravelWaiting(ushort id, ref Vehicle car)
+        {
+            if (!Owns(id)) return false;
+            DevPoliceParking place;
+            if (devTargets.TryGetValue(id, out place) && place.RetryPath) return true;
+            return (car.m_flags & Vehicle.Flags.WaitingPath) == 0 && car.m_blockCounter >= 140 && TravelPathFailed(id, ref car);
+        }
         private static void DevAssignTarget(ushort id)
         {
             if (devTargetEvent != current) { DevClearTargets(); devTargetEvent=current; }
@@ -67,7 +100,7 @@ namespace CivicPressure
         }
         private static void DevPark(ushort id,ref Vehicle car)
         {
-            DevPoliceParking place=devTargets[id]; place.Parked=true; place.Target=car.GetLastFramePosition();
+            DevPoliceParking place=devTargets[id]; place.Parked=true; place.RetryPath=false; place.Target=car.GetLastFramePosition();
             CivicUnrest.PoliceArrived(id,car.m_targetBuilding,place.Target); Freeze(ref car);
         }
         private static bool DevRefreshTarget(ushort id)

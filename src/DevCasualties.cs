@@ -98,6 +98,15 @@ namespace CivicPressure
             DevTreatment c;
             return vehicles.TryGetValue(id,out c) && Valid(c) ? c : null;
         }
+        internal static void Released(ushort id)
+        {
+            DevTreatment c;
+            if (!vehicles.TryGetValue(id, out c)) return;
+            vehicles.Remove(id);
+            c.Vehicle = 0;
+            c.Cancelled = true;
+            cases.Remove(c);
+        }
         private static bool Valid(DevTreatment c)
         {
             if(c.Vehicle==0) return false;

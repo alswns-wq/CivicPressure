@@ -14,14 +14,14 @@ namespace CivicPressure
             DevCombatMotion pose=new DevCombatMotion();
             float age=clock-actionAt, reaction=Pulse(clock-reactionAt,.8f), side=index%2==0 ? 1 : -1;
             float strike=action==1 ? Pulse(age,.75f) : 0;
-            float gas=action==3 && age>=0 && age<1 ? (float)Math.Sin(clock*5+index)*.3f : 0;
-            pose.Forward=strike*.65f-(hit ? reaction*.45f : 0);
-            pose.Side=(!hit ? reaction*.55f*side : 0)+gas*.3f;
-            pose.Lean=(moving ? 9 : 0)+strike*24-(hit ? reaction*25 : 0);
-            pose.Roll=(!hit ? reaction*20*side : 0)+gas*15;
+            float gas=action==3 && age>=0 && age<1 ? (float)Math.Sin(clock*5+index)*.15f : 0;
+            pose.Forward=strike*.325f-(hit ? reaction*.225f : 0);
+            pose.Side=(!hit ? reaction*.275f*side : 0)+gas*.3f;
+            pose.Lean=strike*12-(hit ? reaction*12.5f : 0);
+            pose.Roll=(!hit ? reaction*10*side : 0)+gas*15;
             pose.Kneel=(!hit ? reaction*.16f : reaction*.08f);
             pose.Brace=reaction;
-            pose.Twist=(action==1 ? DevVisualMotion.Strike(age,.75f)*22 : action==2 ? DevVisualMotion.Strike(age,1)*15 : 0)*side;
+            pose.Twist=(action==1 ? DevVisualMotion.Strike(age,.75f)*11 : action==2 ? DevVisualMotion.Strike(age,1)*7.5f : 0)*side;
             if(fallAt>=0 && clock>=fallAt && (permanent || clock<downUntil)) {
                 float landing=Mathf.SmoothStep(0,1,Mathf.Clamp01((clock-fallAt)/.4f));
                 float recovery=permanent ? 0 : Mathf.SmoothStep(0,1,Mathf.Clamp01(clock-(downUntil-1)));
@@ -49,7 +49,9 @@ namespace CivicPressure
         internal bool ArrestTeam, Detained;
         internal int Prisoner=-1;
         internal float BoardingAt=-1;
-        internal ushort Car;
+        internal long Dispatch;
+        internal long EscortDispatch;
+        internal Vector3 EscortExit, EscortParkedAt;
         internal int Hits, Limit, Action;
         internal float DownUntil, NextAttack, ActionAt, FleeAt;
         internal bool Placed, Fleeing, Gone, Dead, Evacuated; internal DevTreatment Treatment;
@@ -73,7 +75,14 @@ namespace CivicPressure
     public sealed partial class CrowdPreview
     {
         private readonly DevCombatant[] devRioters=new DevCombatant[88]; private DevCombatant[] devPolice=new DevCombatant[25];
-        private readonly Dictionary<ushort,int> devBattleCars=new Dictionary<ushort,int>();
+        private readonly Dictionary<long,int> devBattleCars=new Dictionary<long,int>();
+        private DevRoadRibbon devCombatRoad;
+        private DevRoadRibbon DevSceneRoad(UnrestView state)
+        {
+            // Only battle/dispersal may use this snapshot; marching and new damage need a live road.
+            if(state.DevRoad!=null) devCombatRoad=state.DevRoad;
+            return devCombatRoad;
+        }
         private bool[] devPresentCars=new bool[5];
         private readonly System.Random devBattleRandom=new System.Random();
         private ushort devBattleLead;
@@ -96,6 +105,7 @@ namespace CivicPressure
             DevResetDeaths();
             DevResetMedics(); devBackup=null; devTotalOfficers=devWoundedOfficers=0;
             DevResetLines();
+            devCombatRoad=null;
             Array.Clear(devRioters,0,88); Array.Clear(devPolice,0,devPolice.Length); devBattleCars.Clear();
             devBattleClock=devNextDecision=devNextGas=devEndAt=0; devBattleLead=0; devBattleOutcome=0; devFleeHours=0; devFleeStarted=false;
             DevCombatResult.Current=null; DevCombatResult.Resolving=false;
@@ -110,6 +120,7 @@ namespace CivicPressure
         {
             long stamp=CivicUnrest.DevRiotStamp;
             if(devRiotStamp!=stamp) { DevSuppressionReset(); devRiotStamp=stamp; }
+            DevRoadRibbon road=DevSceneRoad(state);
             devBattleClock+=delta; devTime=devBattleClock; devCenter=state.Position;
             DevMedicTick(delta);
             // Walkers already interpolate the published game clock, including pause/speed changes.
@@ -134,31 +145,9 @@ namespace CivicPressure
             if(hasPolice) devBattleLead=state.PoliceVehicle;
             // Once dispersal starts it must finish even if the last patrol car leaves.
             if(!devSuppressing && devBattleOutcome==0) return;
-            DevRoadRibbon road=state.DevRoad;
             if(road==null) return;
             if(devBattleOutcome<0 && !hasPolice && DevVehicleAssault.NoTargets(stamp)) devVictoryMarch=true;
-            Array.Clear(devPresentCars,0,devPresentCars.Length);
-            if(hasPolice) foreach(DevPoliceUnitView unit in arrived)
-            {
-                int slot;
-                if(!devBattleCars.TryGetValue(unit.Vehicle,out slot))
-                {
-                    if(devPolice.Length<(devBattleCars.Count+1)*5) {
-                        Array.Resize(ref devPolice,(devBattleCars.Count+1)*5);
-                        Array.Resize(ref devPresentCars,devBattleCars.Count+1);
-                    }
-                    slot=devBattleCars.Count; devBattleCars.Add(unit.Vehicle,slot);
-                    int crew=DevCombatRules.Crew(unit.Vehicle);
-                    for(int seat=0;seat<crew;seat++) {
-                        Vector3 p=road.Constrain(unit.Position+new Vector3((seat%2==0?-1:1)*.8f,0,seat*.45f));
-                        int line=unit.Side>0 ? 1 : 0;
-                        // Two initial officers per riot; later waves do not replenish this allowance.
-                        devPolice[slot*5+seat]=new DevCombatant { Armed=unit.Armed || devTotalOfficers+seat<2, Car=unit.Vehicle, Position=p, Exit=p, Placed=true, Line=line, LineSlot=devLines[line].Count++, Limit=8+seat%3, NextAttack=devBattleClock+1+seat*.3f };
-                    }
-                    devTotalOfficers+=crew;
-                }
-                devPresentCars[slot]=true;
-            }
+            DevSyncPolice(hasPolice ? arrived : null,road);
             for(int i=0;i<88;i++) if(devRioters[i]==null && devRiotPlaced[i])
                 devRioters[i]=new DevCombatant { Position=devRiotPlaces[i], Placed=true, Limit=DevCombatRules.Resistance(i), NextAttack=devBattleClock+(float)devBattleRandom.NextDouble()*5 };
 #if DEV
@@ -177,12 +166,6 @@ namespace CivicPressure
                 }
             }
 #endif
-            foreach(DevCombatant officer in devPolice) if(officer!=null) {
-                int carSlot;
-                bool present=devBattleCars.TryGetValue(officer.Car,out carSlot) && devPresentCars[carSlot];
-                officer.FinishTreatment(present && devBattleOutcome==0,devBattleClock);
-                officer.Gone=!present || officer.Evacuated; officer.Moving=false;
-            }
             foreach(DevCombatant officer in devPolice) if(officer!=null && officer.Prisoner>=0 && (officer.Gone || officer.Hits>=officer.Limit || devBattleOutcome<0))
                 DevReleasePrisoner(officer,state);
             if(devBattleOutcome==0 && hasPolice) DevLineTick(road,delta);
@@ -217,7 +200,7 @@ namespace CivicPressure
                 else if(DevPickupWeapon(person,road,delta)) { }
                 else if(devBattleOutcome==0 && hasPolice) DevJoinLine(i,person,road,delta);
                 else if(devBattleOutcome<0) {
-                    if(devVictoryMarch) DevVictoryAdvance(person,road,fleeMeters*(UnrestRules.Speed(true)/300f));
+                    if(devVictoryMarch) { if(state.DevRoad!=null) DevVictoryAdvance(person,road,fleeMeters*(UnrestRules.Speed(true)/300f)); }
                     else DevVictoryPatrol(i,person,road,delta);
                 }
                 devRiotPlaces[i]=person.Position;
@@ -235,7 +218,7 @@ namespace CivicPressure
                     continue;
                 }
                 alive++;
-                if(officer.Prisoner>=0) { if(!DevEscort(officer,road,delta)) DevReleasePrisoner(officer,state); continue; }
+                if(officer.Prisoner>=0) { if(!DevAssignEscort(officer,road,arrived) || !DevEscort(officer,road,delta)) DevReleasePrisoner(officer,state); continue; }
                 if(devBattleOutcome==0) DevAdvanceOfficer(officer,road,delta);
             }
             if(devBattleOutcome==0 && hasPolice && delta>0 && devBattleClock>=devNextDecision)
@@ -308,6 +291,37 @@ namespace CivicPressure
             }
             DevRiotSuppression.Status="[DEV 진압] 경찰 "+alive+"명 · 저항 "+resisting+"명 · 대피 "+fleeing+"명";
         }
+        private void DevSyncPolice(DevPoliceUnitView[] arrived,DevRoadRibbon road)
+        {
+            Array.Clear(devPresentCars,0,devPresentCars.Length);
+            if(arrived!=null) foreach(DevPoliceUnitView unit in arrived)
+            {
+                int slot;
+                if(!devBattleCars.TryGetValue(unit.Dispatch,out slot))
+                {
+                    if(devPolice.Length<(devBattleCars.Count+1)*5) {
+                        Array.Resize(ref devPolice,(devBattleCars.Count+1)*5);
+                        Array.Resize(ref devPresentCars,devBattleCars.Count+1);
+                    }
+                    slot=devBattleCars.Count; devBattleCars.Add(unit.Dispatch,slot);
+                    int crew=DevCombatRules.Crew(unit.Vehicle);
+                    for(int seat=0;seat<crew;seat++) {
+                        Vector3 p=road.Constrain(unit.Position+new Vector3((seat%2==0?-1:1)*.8f,0,seat*.45f));
+                        int line=unit.Side>0 ? 1 : 0;
+                        // Two initial officers per riot; later waves do not replenish this allowance.
+                        devPolice[slot*5+seat]=new DevCombatant { Armed=unit.Armed || devTotalOfficers+seat<2, Dispatch=unit.Dispatch, Position=p, Exit=p, Placed=true, Line=line, LineSlot=devLines[line].Count++, Limit=8+seat%3, NextAttack=devBattleClock+1+seat*.3f };
+                    }
+                    devTotalOfficers+=crew;
+                }
+                devPresentCars[slot]=true;
+            }
+            foreach(DevCombatant officer in devPolice) if(officer!=null) {
+                int carSlot;
+                bool present=devBattleCars.TryGetValue(officer.Dispatch,out carSlot) && devPresentCars[carSlot];
+                officer.FinishTreatment(present && devBattleOutcome==0,devBattleClock);
+                officer.Gone=!present || officer.Evacuated; officer.Moving=false;
+            }
+        }
         private int DevNearest(DevCombatant[] group,Vector3 point,bool riot)
         {
             int nearest=-1; float best=float.MaxValue;
@@ -333,7 +347,7 @@ namespace CivicPressure
             person.Fleeing=true; person.FleeAt=devBattleClock; person.ExitRoute=null; person.ExitApproach=false;
             Vector3[] doors=state.DevEscapeDoors;
             if(doors!=null && doors.Length>0) person.Exit=doors[devBattleRandom.Next(doors.Length)];
-            else { Vector3 forward; person.Exit=state.DevRoad.At(index%2==0 ? 0 : state.DevRoad.Limit,0,out forward); }
+            else { Vector3 forward; DevRoadRibbon road=DevSceneRoad(state); person.Exit=road==null ? person.Position : road.At(index%2==0 ? 0 : road.Limit,0,out forward); }
         }
         private void DevFlee(DevCombatant person,DevRoadRibbon road,float meters)
         {
@@ -370,7 +384,7 @@ namespace CivicPressure
         private bool DevSuppressionPolice(float delta)
         {
             if(!devSuppressing) return false;
-            DevShowLines(CivicUnrest.View.DevRoad);
+            DevShowLines(devCombatRoad);
             for(int i=0;i<officers.Count;i++) {
                 DevCombatant person=devPolice[i]; CrowdActor actor=officers[i];
                 if(person!=null) DevProjectile(i%25,person,devBattleClock-person.ActionAt);
@@ -378,10 +392,11 @@ namespace CivicPressure
                 actor.Show(visible); if(!visible) continue;
                 Vector3 toward=DevVisualMotion.LookDirection(person.Travel,person.Moving,person.Aim-person.Position);
                 Quaternion facing=toward.sqrMagnitude>.01f ? Quaternion.LookRotation(toward) : Quaternion.identity;
+                facing=actor.FollowCombatFacing(facing,delta);
                 bool retreat=!person.Dead && devBattleOutcome<0 && devBattleClock>=devEndAt-5;
                 bool down=person.Hits>=person.Limit && !retreat;
                 DevCombatMotion motion=DevCombatMotion.Sample(devBattleClock,i,retreat ? 0 : person.Action,person.ActionAt,person.ReactionAt,person.ReactionHit,down ? person.FallAt : -100,0,down,person.Moving);
-                actor.Pose(DevVisualOffset(person,CivicUnrest.View.DevRoad,facing,motion),facing,false,!down && (person.Moving || (!retreat && (Math.Abs(motion.Side)>.05f || motion.Forward>.05f))),true,devBattleClock,delta);
+                actor.Pose(DevVisualOffset(person,devCombatRoad,facing,motion),facing,false,!down && (person.Moving || (!retreat && (Math.Abs(motion.Side)>.05f || motion.Forward>.05f))),true,devBattleClock,delta);
                 float action=devBattleClock-person.ActionAt;
                 actor.CombatBody(facing,motion);
                 bool guarding=!down && !retreat && (person.Prisoner<0 || DevPoliceLineRules.CustodyStrike(devBattleClock,person.ActionAt));
@@ -407,6 +422,7 @@ namespace CivicPressure
             if(!DevCombatControls(index)) return;
             Vector3 direction=DevVisualMotion.LookDirection(person.Travel,person.Moving,(person.Fleeing ? person.Exit : person.Aim)-person.Position);
             if(direction.sqrMagnitude>.01f) facing=Quaternion.LookRotation(direction);
+            facing=actor.FollowCombatFacing(facing,person.Dead ? 0 : delta);
             if(person.Detained) {
                 actor.CasualtyMark(0,Vector3.zero);
                 actor.Pose(person.Position,facing,true,person.Moving,false,devBattleClock,delta);
@@ -416,7 +432,7 @@ namespace CivicPressure
             }
             bool down=DevCombatRules.Down(devBattleClock,person.DownUntil);
             DevCombatMotion motion=DevCombatMotion.Sample(devBattleClock,index,person.Fleeing ? 0 : person.Action,person.ActionAt,person.ReactionAt,person.ReactionHit,person.FallAt,person.DownUntil,person.Dead,person.Moving);
-            actor.Pose(DevVisualOffset(person,CivicUnrest.View.DevRoad,facing,motion),facing,true,!down && (person.Fleeing || person.Moving || Math.Abs(motion.Side)>.05f || motion.Forward>.05f),false,person.Dead ? person.FallAt : devBattleClock,person.Dead ? 0 : delta);
+            actor.Pose(DevVisualOffset(person,devCombatRoad,facing,motion),facing,true,!down && (person.Fleeing || person.Moving || Math.Abs(motion.Side)>.05f || motion.Forward>.05f),false,person.Dead ? person.FallAt : devBattleClock,person.Dead ? 0 : delta);
             actor.SetPlacardVisible(false);
             float action=devBattleClock-person.ActionAt;
             actor.CombatBody(facing,motion);

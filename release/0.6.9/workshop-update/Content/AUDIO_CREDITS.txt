@@ -1,0 +1,33 @@
+Civic Pressure DEV audio - user selected candidates 2, 3, 4 on 2026-10-25.
+All three sources are CC0: https://creativecommons.org/publicdomain/zero/1.0/
+Downloaded public HQ MP3 previews; original WAV files were not downloaded.
+
+crowd.pcm: "angry crowd" by FillMat
+https://freesound.org/people/FillMat/sounds/384401/
+First 24 seconds, mono 22050 Hz signed 16-bit little-endian PCM,
+100 Hz high-pass, 0.4-second fade at both ends.
+The recording is a drama performance; contextual English speech may remain.
+
+shot.pcm: paintball shot by fabianofa
+https://freesound.org/people/fabianofa/sounds/98189/
+Mono 22050 Hz signed 16-bit little-endian PCM.
+Used as a stylized rubber-round effect, not a recording of a real police weapon.
+
+impact.pcm: wood impact by Ian_G
+https://freesound.org/people/Ian_G/sounds/547414/
+Mono 22050 Hz signed 16-bit little-endian PCM.
+Used as a stylized baton/shield impact.
+
+Candidate 1 (dr_skitz boo) is deliberately excluded.
+No game audio or third-party executable is bundled.
+
+live-shot.pcm: "Weapons_Handun_Shot" by unfa (selected candidate 1, 2026-10-27)
+https://freesound.org/people/unfa/sounds/565130/
+CC0: https://creativecommons.org/publicdomain/zero/1.0/
+Public HQ MP3 preview, not the original FLAC download:
+https://cdn.freesound.org/previews/565/565130_1038806-hq.mp3
+Converted to mono 22050 Hz signed 16-bit little-endian PCM, 1.022 seconds.
+No gain boost or trimming. Used only for armed support officers' gunfire.
+Source credits these CC0 sounds: morganpurkis (399268), cognito perceptu
+(20352), freemusicpromo (512942), _Linus_Sebastian (493731), okieactor (415912).
+Source page snapshot: work/audio-candidates/live-shot-source.html (development only).

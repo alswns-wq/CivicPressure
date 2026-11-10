@@ -37,6 +37,7 @@ namespace CivicPressure
     internal sealed class DevPoliceUnitView
     {
         internal ushort Vehicle;
+        internal long Dispatch;
         internal Vector3 Position;
         internal int Side;
         internal bool Armed;
@@ -54,7 +55,7 @@ namespace CivicPressure
                     if (!Valid(e, unit)) continue;
                     Vehicle car = Singleton<VehicleManager>.instance.m_vehicles.m_buffer[unit.Vehicle];
                     if ((car.m_flags & (Vehicle.Flags.Spawned | Vehicle.Flags.Stopped | Vehicle.Flags.Deleted)) != (Vehicle.Flags.Spawned | Vehicle.Flags.Stopped) || !DevIsParked(unit.Vehicle)) continue;
-                    result.Add(new DevPoliceUnitView { Vehicle = unit.Vehicle, Position = car.GetLastFramePosition(), Side=DevSide(unit.Vehicle), Armed=DevArmedCars.ContainsKey(unit.Vehicle) });
+                    result.Add(new DevPoliceUnitView { Vehicle = unit.Vehicle, Dispatch = DevDispatch(unit.Vehicle), Position = car.GetLastFramePosition(), Side=DevSide(unit.Vehicle), Armed=DevArmedCars.ContainsKey(unit.Vehicle) });
                 }
             return result.ToArray();
         }

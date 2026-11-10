@@ -94,6 +94,21 @@ namespace CivicPressure
             return s.Append('"').ToString();
         }
 
+#if DEV
+        internal static object ParseAiJson(string text)
+        {
+            if (text == null || text.Length > 65536) throw new FormatException();
+            int depth = 0; bool quoted = false, escaped = false;
+            foreach (char c in text)
+            {
+                if (quoted) { if (escaped) escaped = false; else if (c == '\\') escaped = true; else if (c == '"') quoted = false; }
+                else if (c == '"') quoted = true;
+                else if (c == '{' || c == '[') { if (++depth > 32) throw new FormatException(); }
+                else if (c == '}' || c == ']') depth--;
+            }
+            Reader reader = new Reader(text); object value = reader.Value(); reader.End(); return value;
+        }
+#endif
         // Minimal JSON reader: objects, arrays, strings, numbers, true/false/null. Enough for translation files.
         private sealed class Reader
         {

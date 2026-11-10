@@ -18,6 +18,7 @@ namespace CivicPressure
         internal const string IconResource = "CivicPressure.UnifiedUIIcon.png";
         private const string ButtonName = "CivicPressureButton";
         private static UIComponent button;
+        private static Texture2D ownedIcon;
         private static bool warned;
 
         // True when the toolbar button was created; false means keep the floating button.
@@ -28,17 +29,18 @@ namespace CivicPressure
             try
             {
                 Assembly library = EnabledLibrary();
-                if (library == null) { Warn("enabled Unified UI or its library was not detected"); return false; }
+                if (library == null) { Warn("an existing Unified UI panel was not detected"); return false; }
                 MethodInfo register = FindRegister(library.GetType(ApiTypeName, false));
                 if (register == null) { Warn("its button API has changed"); return false; }
-                Texture2D icon = LoadIcon();
-                if (icon == null) { Warn("the toolbar icon is missing from the mod"); return false; }
-                button = register.Invoke(null, new object[] { ButtonName, null, tooltip, icon, onToggle, null, null, null }) as UIComponent;
+                LoadIcon();
+                if (ownedIcon == null) { Warn("the toolbar icon is missing from the mod"); return false; }
+                button = register.Invoke(null, new object[] { ButtonName, null, tooltip, ownedIcon, onToggle, null, null, null }) as UIComponent;
+                if (button == null) Release();
                 return button != null;
             }
             catch (Exception error)
             {
-                button = null;
+                Release();
                 Warn((error.InnerException ?? error).Message);
                 return false;
             }
@@ -53,18 +55,9 @@ namespace CivicPressure
 
         private static Assembly EnabledLibrary()
         {
-            foreach (PluginManager.PluginInfo plugin in Singleton<PluginManager>.instance.GetPluginsInfo())
-            {
-                if (plugin == null || !plugin.isEnabled || plugin.userModInstance == null) continue;
-                if (!IsUnifiedUIMod(plugin.userModInstance.GetType().FullName)) continue;
-                foreach (Assembly assembly in plugin.GetAssemblies())
-                    if (assembly.GetName().Name == LibraryName) return assembly;
-                // Unity may resolve a shared library from another mod instead of listing it with this plugin.
-                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-                    if (assembly.GetName().Name == LibraryName && FindRegister(assembly.GetType(ApiTypeName, false)) != null) return assembly;
-            }
-            // Other mods can provide an already active Unified UI panel without the standalone mod enabled.
-            // Exists is a non-creating check; never construct a panel merely because a bundled library is loaded.
+            // Each bundled library can own a separate static MainPanel.Instance. Registering with an arbitrary
+            // plugin's copy can create a second toolbar containing only CP. Use an already existing panel only;
+            // if UUI has not initialized yet, keep the floating button rather than creating another toolbar.
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (assembly.GetName().Name != LibraryName || FindRegister(assembly.GetType(ApiTypeName, false)) == null) continue;
@@ -118,18 +111,21 @@ namespace CivicPressure
         internal static void Release()
         {
             UIComponent old = button;
+            Texture2D icon = ownedIcon;
             button = null;
-            if (old == null) return;
-            try { DestroyButton(old); }
+            ownedIcon = null;
+            if (ReferenceEquals(old, null) && ReferenceEquals(icon, null)) return;
+            try { DestroyButton(old, icon); }
             catch (Exception error) { Warn(error.Message); }
         }
 
         // Unity's native calls stay in this separate method so Release itself compiles and returns quietly where
         // Unity is unavailable (the automated checks), and any failure lands inside Release's catch.
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private static void DestroyButton(UIComponent target)
+        private static void DestroyButton(UIComponent target, Texture2D icon)
         {
-            UnityEngine.Object.Destroy(target.gameObject);
+            try { if (target != null) UnityEngine.Object.Destroy(target.gameObject); }
+            finally { if (icon != null) UnityEngine.Object.Destroy(icon); }
         }
 
         private static Texture2D LoadIcon()
@@ -146,9 +142,11 @@ namespace CivicPressure
                     read += count;
                 }
                 Texture2D texture = new Texture2D(2, 2, TextureFormat.ARGB32, false);
+                ownedIcon = texture;
                 texture.name = "CivicPressure";
                 if (texture.LoadImage(bytes)) return texture;
                 UnityEngine.Object.Destroy(texture);
+                ownedIcon = null;
                 return null;
             }
         }

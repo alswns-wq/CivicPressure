@@ -26,6 +26,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="TrafficRouting.cs" />
+    <Compile Include="DevAiPanel.cs" />
+    <Compile Include="DevAiInput.cs" />
+    <Compile Include="DevAiProbe.cs" />
+    <Compile Include="DevAiReply.cs" />
     <Compile Include="CivicRecords.cs" /><Compile Include="ProtestDemands.cs" /><Compile Include="ComplaintHistory.cs" /><Compile Include="HappinessTrend.cs" /><Compile Include="CensusProjection.cs" /><Compile Include="ComplaintRecurrence.cs" /><Compile Include="UnifiedUIButton.cs" /><Compile Include="Edition.cs" /><Compile Include="GameClock.cs" /><Compile Include="ReleaseNotes.cs" /><Compile Include="NoticePanel.cs" /><Compile Include="VisitModel.cs" /><Compile Include="CivicVisits.cs" /><Compile Include="DevTools.cs" /><Compile Include="LocaleFile.cs" /><Compile Include="StandingModel.cs" /><Compile Include="CivicStanding.cs" /><Compile Include="ReviewWindow.cs" />
     <EmbeddedResource Include="Resources\UnifiedUIIcon.png"><LogicalName>CivicPressure.UnifiedUIIcon.png</LogicalName></EmbeddedResource>
     <Reference Include="System">
@@ -58,13 +62,14 @@
     <Compile Include="ComplaintModel.cs" />
     <Compile Include="CivicComplaints.cs" />
     <Compile Include="CivicSimulation.cs" />
-    <Compile Include="CityCensus.cs" /><Compile Include="ComplaintHotspot.cs" /><Compile Include="AmenityCoverage.cs" />
+    <Compile Include="ComplaintGuide.cs" /><Compile Include="CityCensus.cs" /><Compile Include="ServiceWait.cs" /><Compile Include="ComplaintHotspot.cs" /><Compile Include="AmenityCoverage.cs" />
     <Compile Include="BuildingArea.cs" />
     <Compile Include="CivicPanel.cs" />
     <Compile Include="FloatingButton.cs" />
     <Compile Include="ShortcutSettings.cs" />
     <Compile Include="UnrestModel.cs" />
     <Compile Include="UnrestRoads.cs" />
+    <Compile Include="UnrestRecovery.cs" />
     <Compile Include="UnrestSettings.cs" />
     <Compile Include="UnrestPatches.cs" />
     <Compile Include="CivicUnrest.cs" />

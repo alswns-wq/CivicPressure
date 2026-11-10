@@ -16,6 +16,15 @@ namespace CivicPressure
         private Material board;
         private readonly List<Material> owned = new List<Material>();
         private int walkingState = -1;
+        private float gait;
+        private bool combatFacingReady;
+        private Quaternion combatFacing;
+        internal Quaternion FollowCombatFacing(Quaternion target, float delta)
+        {
+            if (!combatFacingReady) { combatFacing = target; combatFacingReady = true; }
+            combatFacing = Quaternion.Slerp(combatFacing, target, DevVisualMotion.Blend(delta, 14));
+            return combatFacing;
+        }
         private bool rigReady;
         private bool boardPainted, boardRiot;
         private static int cameraFrame=-1;
@@ -40,6 +49,11 @@ namespace CivicPressure
         internal void SetLiveAmmo(bool live) { if(launcherAccent!=null) launcherAccent.color=live ? new Color(.12f,.14f,.16f) : new Color(1f,.32f,.025f); }
         private Transform rightFoot, leftFoot;
         private float devNextBone,devBoneDelta;
+        private Transform[] poseBones;
+        private Vector3[] poseFromPositions,poseToPositions;
+        private Quaternion[] poseFromRotations,poseToRotations;
+        private bool poseReady;
+        private float poseAge,poseInterval;
         private bool devDetailed=true;
         private static int devViewFrame=-1;
         private static Camera devViewCamera;
@@ -135,7 +149,10 @@ namespace CivicPressure
             AnimatorUtility.DeoptimizeTransformHierarchy(rig);
             animator.Rebind();
             animator.Update(0);
-            foreach (Transform bone in rig.GetComponentsInChildren<Transform>(true))
+            poseBones=rig.GetComponentsInChildren<Transform>(true);
+            poseFromPositions=new Vector3[poseBones.Length]; poseToPositions=new Vector3[poseBones.Length];
+            poseFromRotations=new Quaternion[poseBones.Length]; poseToRotations=new Quaternion[poseBones.Length];
+            foreach (Transform bone in poseBones)
             {
                 string name = bone.name.ToLowerInvariant().Replace(" ", "").Replace("_", "");
                 if (hand == null && (name.Contains("righthand") || name.Contains("rhand") || name == "hand.r")) hand = bone;
@@ -145,6 +162,37 @@ namespace CivicPressure
             }
             rigReady = true;
             Debug.Log("[CivicPressure] Crowd rig initialized: " + rig.name + ", transforms=" + rig.GetComponentsInChildren<Transform>(true).Length + ", human=" + animator.isHuman);
+        }
+        private void RestoreAnimationPose()
+        {
+            if (!poseReady) return;
+            float blend=DevVisualMotion.PoseBlend(poseAge,poseInterval);
+            for(int i=0;i<poseBones.Length;i++) {
+                Transform bone=poseBones[i]; if(bone==null || bone==rig.transform) continue;
+                // Start the next render transition at the displayed base pose, never at a hand/IK override.
+                poseFromPositions[i]=Vector3.Lerp(poseFromPositions[i],poseToPositions[i],blend);
+                poseFromRotations[i]=Quaternion.Slerp(poseFromRotations[i],poseToRotations[i],blend);
+                bone.localPosition=poseToPositions[i]; bone.localRotation=poseToRotations[i];
+            }
+        }
+        private void CaptureAnimationPose(float interval)
+        {
+            for(int i=0;i<poseBones.Length;i++) {
+                Transform bone=poseBones[i]; if(bone==null || bone==rig.transform) continue;
+                poseToPositions[i]=bone.localPosition; poseToRotations[i]=bone.localRotation;
+                if(!poseReady) { poseFromPositions[i]=poseToPositions[i]; poseFromRotations[i]=poseToRotations[i]; }
+            }
+            poseReady=true; poseAge=0; poseInterval=interval;
+        }
+        private void ApplyAnimationPose(bool smooth)
+        {
+            if(!poseReady) return;
+            float blend=smooth ? DevVisualMotion.PoseBlend(poseAge,poseInterval) : 1;
+            for(int i=0;i<poseBones.Length;i++) {
+                Transform bone=poseBones[i]; if(bone==null || bone==rig.transform) continue;
+                bone.localPosition=Vector3.Lerp(poseFromPositions[i],poseToPositions[i],blend);
+                bone.localRotation=Quaternion.Slerp(poseFromRotations[i],poseToRotations[i],blend);
+            }
         }
         private Material Paint(Color color)
         {
@@ -214,7 +262,7 @@ namespace CivicPressure
             }
         }
 
-        internal void Show(bool visible) { if(Root!=null && Root.activeSelf!=visible)Root.SetActive(visible); }
+        internal void Show(bool visible) { if(Root!=null && Root.activeSelf!=visible) { Root.SetActive(visible); if (!visible) { combatFacingReady=false; gait=0; poseAge=poseInterval; } } }
         internal void HidePlacard() { if (sign != null) sign.gameObject.SetActive(false); }
         internal void SetPlacardVisible(bool visible) { if (sign != null) sign.gameObject.SetActive(visible); if(visible) CasualtyMark(0,Vector3.zero); }
         internal void HideBaton() { if (baton != null) baton.gameObject.SetActive(false); }
@@ -272,6 +320,7 @@ namespace CivicPressure
         }
         internal void CombatBody(Quaternion facing,DevCombatMotion motion)
         {
+            if (motion.Fall == 0) motion.Lean += gait * 4.5f;
             Root.transform.rotation=facing*Quaternion.Euler(85*motion.Fall,0,motion.Roll);
             Root.transform.position+=Vector3.up*(motion.Fall*.08f-motion.Kneel);
             if(rig!=null) rig.transform.localRotation=Quaternion.Euler(motion.Lean,motion.Twist,0);
@@ -300,7 +349,7 @@ namespace CivicPressure
         {
             float breath=Mathf.Sin(time*1.7f+index*1.9f);
             float brace=motion.Brace;
-            if(rig!=null) rig.transform.localRotation=Quaternion.Euler(motion.Lean+5+brace*9+breath*.6f,motion.Twist-8,0);
+            if(rig!=null) rig.transform.localRotation=Quaternion.Euler(motion.Lean+2.5f+brace*4.5f+breath*.3f,motion.Twist-4,0);
             // Plant a staggered stance only while standing; preserve the native walk cycle in motion.
             if(!moving && devDetailed) {
                 Vector3 feet=Root.transform.position;
@@ -396,7 +445,7 @@ namespace CivicPressure
         }
         internal void Cower(Quaternion facing, float intensity)
         {
-            if (rig != null) rig.transform.localRotation = Quaternion.Euler(15 * intensity, 0, 0);
+            if (rig != null) rig.transform.localRotation = Quaternion.Euler(7.5f * intensity, 0, 0);
             Vector3 arm = facing * new Vector3(.1f, .65f, .3f);
             if (hand != null && hand.parent != null) Aim(hand.parent, hand, arm);
             if (otherHand != null && otherHand.parent != null) Aim(otherHand.parent, otherHand, arm);
@@ -478,6 +527,7 @@ namespace CivicPressure
         }
         internal void Pose(Vector3 position, Quaternion facing, bool riot, bool moving, bool suppressed, float time, float delta)
         {
+            gait = DevVisualMotion.Gait(gait, moving, delta);
             Root.transform.position = position; Root.transform.rotation = facing;
             float wave = Mathf.Sin(time * (riot ? 7 : 3) + index * 1.7f);
             float cadence=1, lift=0;
@@ -486,7 +536,8 @@ namespace CivicPressure
             gesture=DevVisualMotion.Gesture(index,time);
             if(!riot && !police) { lift=DevProtestRules.Lift(index,time); wave=Mathf.Sin(time*3*cadence+index*1.7f); }
             bodyYaw=Mathf.Sin(time*.7f+index*2.4f)*(riot ? 6 : 3);
-            bodyRoll=moving ? wave*(police ? 1 : riot ? 3 : 1.5f) : wave*.6f;
+            bodyRoll=wave*Mathf.Lerp(.6f, police ? 1 : riot ? 3 : 1.5f, gait);
+            if (riot || police) { bodyYaw*=.5f; bodyRoll*=.5f; }
             if (animator != null && !rigReady)
             {
                 try { InitializeRig(); }
@@ -500,10 +551,9 @@ namespace CivicPressure
             }
             if (animator != null)
             {
-                rig.transform.localRotation = Quaternion.Euler(riot && !suppressed ? 5 + wave * 4 : 0, 0, 0);
-                rig.transform.localRotation=Quaternion.Euler(police ? 3 : riot && !suppressed ? 5+gesture*9 : lift*2,bodyYaw,bodyRoll);
+                rig.transform.localRotation=Quaternion.Euler(police ? 1.5f : riot && !suppressed ? 2.5f+gesture*4.5f : lift*2,bodyYaw,bodyRoll);
                 CitizenManager manager = Singleton<CitizenManager>.instance;
-                int mode = moving ? 1 : 0;
+                int mode = moving || gait > .08f ? 1 : 0;
                 // Root positions and action poses still follow every frame. Only the expensive
                 // native skeleton evaluation is budgeted; retain elapsed animation time.
                 Camera boneCamera=ViewCamera;
@@ -511,20 +561,27 @@ namespace CivicPressure
                 devDetailed=boneDistance<=100*100;
                 float boneInterval=DevVisualMotion.BoneInterval(boneDistance), boneNow=Time.realtimeSinceStartup;
                 devBoneDelta+=delta;
-                bool evaluate=mode!=walkingState || (devBoneDelta>0 && boneNow>=devNextBone);
+                poseAge+=delta>0 ? DevVisualMotion.FrameDelta(Time.unscaledDeltaTime,false) : 0;
+                bool evaluate=!poseReady || mode!=walkingState || (devBoneDelta>0 && boneNow>=devNextBone);
                 if(evaluate) {
+                RestoreAnimationPose();
                 animator.SetInteger(manager.ID_State, (int)CitizenInfo.AnimationState.Default);
-                animator.SetFloat(manager.ID_Speed, moving ? (riot ? 3.8f*cadence : 1.6f*cadence) : 0);
+                animator.SetFloat(manager.ID_Speed, gait * (police ? 1.6f : riot ? 3.8f*cadence : 1.6f*cadence));
                 if (mode != walkingState)
                 {
-                    int state = moving ? manager.ID_walk_0 : manager.ID_idle;
-                    if (animator.HasState(0, state)) animator.Play(state, 0, (index * .137f) % 1);
+                    int state = mode == 1 ? manager.ID_walk_0 : manager.ID_idle;
+                    if (animator.HasState(0, state)) {
+                        if (walkingState < 0) animator.Play(state, 0, (index * .137f) % 1);
+                        else animator.CrossFadeInFixedTime(state, .18f);
+                    }
                     walkingState = mode;
                 }
-                animator.Update(devBoneDelta * (moving ? (riot ? 1.9f*cadence : 1.2f*cadence) : (riot && !suppressed ? 1.6f : 1)));
+                animator.Update(devBoneDelta * Mathf.Lerp(riot && !suppressed ? 1.6f : 1, police ? 1.2f : riot ? 1.9f*cadence : 1.2f*cadence, gait));
+                CaptureAnimationPose(boneInterval);
                 devBoneDelta=0;
                 devNextBone=devNextBone==0 ? boneNow+boneInterval*(1+(index%17)/17f) : DevVisualMotion.NextBone(boneNow,devNextBone,boneInterval);
                 }
+                if(devDetailed || evaluate) ApplyAnimationPose(devDetailed);
                 if (animator.isHuman)
                 {
                     if (hand == null) hand = animator.GetBoneTransform(HumanBodyBones.RightHand);
@@ -547,8 +604,8 @@ namespace CivicPressure
             }
             else
             {
-                fallbackLeftLeg.localRotation = Quaternion.Euler(moving ? wave * 25 : 0, 0, 0);
-                fallbackRightLeg.localRotation = Quaternion.Euler(moving ? -wave * 25 : 0, 0, 0);
+                fallbackLeftLeg.localRotation = Quaternion.Euler(gait * wave * 25, 0, 0);
+                fallbackRightLeg.localRotation = Quaternion.Euler(-gait * wave * 25, 0, 0);
                 fallbackArm.localRotation = Quaternion.Euler(riot && !suppressed ? -65 + wave * 55 : wave * 8, 0, 0);
                 fallbackArm.localRotation=Quaternion.Euler(!police && !suppressed ? -gesture*120+wave*8 : wave*8,0,0);
             }

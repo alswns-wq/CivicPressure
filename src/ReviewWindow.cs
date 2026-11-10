@@ -20,6 +20,13 @@ namespace CivicPressure
         private readonly UILabel[] history = new UILabel[StandingRules.MaxReviews];
         private float nextRefresh;
 
+        public override void OnDestroy()
+        {
+            if (flat != null) UnityEngine.Object.Destroy(flat);
+            flat = null;
+            base.OnDestroy();
+        }
+
         internal static void Toggle()
         {
             UIView view = UIView.GetAView();

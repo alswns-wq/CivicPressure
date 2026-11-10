@@ -56,6 +56,7 @@ namespace CivicPressure
                 }
                 if (count != 2) throw new MissingMethodException("Expected two CS1 CarAI segment position overloads");
                 InstallRouting();
+                PatchResponse(typeof(CitizenManager), "ReleaseCitizen", new Type[] { typeof(uint) }, "CitizenReleasing");
                 PatchResponse(typeof(CitizenMessage), "GetSenderName", Type.EmptyTypes, "OfficeSender");
                 PatchResponse(typeof(ChirpPanel),"OnTargetClick",new Type[]{typeof(ColossalFramework.UI.UIComponent),typeof(ColossalFramework.UI.UIMouseEventParameter)},"OfficeClick");
                 MethodInfo arrive = typeof(PoliceCarAI).GetMethod("ArriveAtTarget", BindingFlags.NonPublic | BindingFlags.Instance,
@@ -77,6 +78,7 @@ namespace CivicPressure
                 PatchResponse(typeof(AmbulanceAI),"SimulationStep",new Type[]{typeof(ushort),typeof(Vehicle).MakeByRefType(),typeof(Vector3)},"MedicalHolding");
                 PatchResponse(typeof(AmbulanceAI),"UpdateBuildingTargetPositions",new Type[]{typeof(ushort),typeof(Vehicle).MakeByRefType(),typeof(Vector3),typeof(ushort),typeof(Vehicle).MakeByRefType(),typeof(int).MakeByRefType(),typeof(float)},"MedicalDestination");
                 PatchResponse(typeof(PoliceCarAI), "SimulationStep", new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vector3) }, "HoldPolice");
+                PatchResponse(typeof(CarAI), "PathfindFailure", new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() }, "RetryPolicePath");
                 PatchResponse(typeof(PoliceCarAI), "UpdateBuildingTargetPositions", new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vector3), typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(int).MakeByRefType(), typeof(float) }, "SkipBuildingDestination");
                 PatchResponse(typeof(PoliceCarAI), "TryCollectCrime", new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vehicle.Frame).MakeByRefType() }, "SkipBuildingCrime");
                 PatchResponse(typeof(PoliceCarAI), "CanLeave", new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() }, "KeepPoliceOnScene");
@@ -250,9 +252,12 @@ namespace CivicPressure
         private static void EndPolicePath(VehicleInfo.VehicleCategory __state) { policePathCategory = __state; }
         private static bool HoldPolice(ushort vehicleID, ref Vehicle data)
         {
+            if (PoliceDeployment.TravelWaiting(vehicleID, ref data)) return false;
             if (!PoliceDeployment.Holding(vehicleID)) return true;
             PoliceDeployment.Freeze(ref data); return false;
         }
+        private static bool RetryPolicePath(ushort vehicleID, ref Vehicle data)
+        { return !PoliceDeployment.TravelPathFailed(vehicleID, ref data); }
         private static bool SkipBuildingDestination(ushort vehicleID) { return !PoliceDeployment.Owns(vehicleID); }
         private static bool SkipBuildingCrime(ushort vehicleID) { return !PoliceDeployment.Owns(vehicleID); }
         private static bool KeepPoliceOnScene(ushort vehicleID, ref bool __result)
@@ -268,7 +273,16 @@ namespace CivicPressure
             return false;
         }
 
-        private static void VehicleReleasing(ushort __0) { CivicUnrest.VehicleReleased(__0); }
+        private static void CitizenReleasing(uint __0) { CityCensus.ForgetCitizen(__0); }
+        private static void VehicleReleasing(ushort __0)
+        {
+            if (PoliceDeployment.Owns(__0)) {
+                Vehicle car = Singleton<VehicleManager>.instance.m_vehicles.m_buffer[__0];
+                Debug.LogWarning("[CivicPressure] Assigned convoy vehicle released: vehicle=" + __0 +
+                    ", flags=" + car.m_flags + ", path=" + car.m_path + ", blocked=" + car.m_blockCounter);
+            }
+            CivicUnrest.VehicleReleased(__0);
+        }
 
         private static bool LimitOwnFireSpread(ushort buildingID, ref Building buildingData)
         {

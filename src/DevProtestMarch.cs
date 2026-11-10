@@ -30,6 +30,13 @@ namespace CivicPressure
         private readonly Vector3[] devProtestPlaces=new Vector3[49];
         private readonly Quaternion[] devProtestFacings=new Quaternion[49];
         private readonly bool[] devProtestPlaced=new bool[49];
+        private void DevSeedRiotFromProtest()
+        {
+            DevResetRiotCrowd();
+            for (int i=0;i<devProtestPlaced.Length;i++) if (devProtestPlaced[i]) {
+                devRiotPlaces[i]=devProtestPlaces[i]; devRiotFacings[i]=devProtestFacings[i]; devRiotPlaced[i]=true;
+            }
+        }
         private void DevResetProtest()
         { devProtestRoad=null; devProtestFront=0; Array.Clear(devProtestPlaced,0,devProtestPlaced.Length); }
         private void DevProtestTick(DevRoadRibbon road,float delta)

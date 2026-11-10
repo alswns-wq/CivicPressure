@@ -11,6 +11,15 @@ namespace CivicPressure
     {
         private static UnrestEvent current;
         private static long nextPath;
+        // Runtime identity: a recycled vehicle slot must never inherit its previous crew.
+        private static long nextDispatchId;
+        private static readonly Dictionary<ushort,long> dispatchIds = new Dictionary<ushort,long>();
+        internal static long DevDispatch(ushort id)
+        {
+            long token;
+            if (!dispatchIds.TryGetValue(id, out token)) { token = ++nextDispatchId; dispatchIds.Add(id, token); }
+            return token;
+        }
         private static readonly MethodInfo StartPath = typeof(PoliceCarAI).GetMethod("StartPathFind", BindingFlags.NonPublic | BindingFlags.Instance,
             null, new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() }, null);
         internal static Vector3 Destination { get { return new Vector3(current.X, current.Y, current.Z); } }
@@ -22,7 +31,7 @@ namespace CivicPressure
         {
             return DevCanPark(id,position,false);
         }
-        internal static void Reset() { current = null; nextPath = 0;
+        internal static void Reset() { current = null; nextPath = 0; dispatchIds.Clear();
 reinforced=0; DevCasualties.Reset(); DevClearTargets(); CivicUnrest.DevResetArmedSupport();
  }
         private static PoliceUnit[] Units(UnrestEvent e)
@@ -55,6 +64,7 @@ reinforced=0; DevCasualties.Reset(); DevClearTargets(); CivicUnrest.DevResetArme
         {
             current = e;
             PoliceUnit u = new PoliceUnit { Vehicle = id, Station = station, StationIndex = Singleton<BuildingManager>.instance.m_buildings.m_buffer[station].m_buildIndex };
+            dispatchIds.Remove(id); DevDispatch(id);
             if (e.DeployedVehicle == 0) SetLead(e, u);
             else { List<PoliceUnit> list = new List<PoliceUnit>(e.Support); list.Add(u); e.Support = list.ToArray(); }
             DevAssignTarget(id);
@@ -73,6 +83,11 @@ reinforced=0; DevCasualties.Reset(); DevClearTargets(); CivicUnrest.DevResetArme
         }
         internal static bool Valid(UnrestEvent e)
         { foreach (PoliceUnit u in Units(e)) if (Valid(e, u)) return true; return false; }
+        internal static void RouteChanged(UnrestEvent e)
+        {
+            current=e; DevClearTargets(); e.Police=false; e.PoliceAt=0;
+            foreach (PoliceUnit u in Units(e)) if (Valid(e,u)) { DevAssignTarget(u.Vehicle); Repath(u); }
+        }
         internal static void Tick(UnrestEvent e, DateTime now)
         {
             current = e;
@@ -89,6 +104,11 @@ reinforced=0; DevCasualties.Reset(); DevClearTargets(); CivicUnrest.DevResetArme
                     DevPark(u.Vehicle,ref cars[u.Vehicle]);
                 }
                 else if (now.Ticks >= nextPath && (car.m_flags & Vehicle.Flags.WaitingPath) == 0) {
+                    if (devTargets[u.Vehicle].RetryPath) {
+                        devTargets[u.Vehicle].RetryPath = false;
+                        Repath(u);
+                        continue;
+                    }
                     bool retry=DevRefreshTarget(u.Vehicle);
                     if(!DevIsParked(u.Vehicle) && (retry || cars[u.Vehicle].m_path==0)) Repath(u);
                     if(DevIsParked(u.Vehicle)) near=true;
@@ -161,15 +181,19 @@ reinforced=0; DevCasualties.Reset(); DevClearTargets(); CivicUnrest.DevResetArme
             ushort id = u.Vehicle;
             cars[id].m_flags &= ~(Vehicle.Flags.Arriving | Vehicle.Flags.Leaving | Vehicle.Flags.GoingBack | Vehicle.Flags.Stopped);
             cars[id].m_flags |= Vehicle.Flags.Emergency2;
+            cars[id].m_blockCounter = 0;
+            cars[id].m_waitCounter = 0;
             object[] args = { id, cars[id] };
             bool path = (bool)StartPath.Invoke(cars[id].Info.m_vehicleAI, args);
             cars[id] = (Vehicle)args[1];
             if (!path) Debug.LogWarning("[CivicPressure] Convoy path rejected: vehicle=" + id + " target=" + Target(id));
             cars[id].m_flags |= Vehicle.Flags.Emergency2;
+            if (!path) TravelPathFailed(id, ref cars[id]);
         }
         internal static void Released(ushort id)
         {
             if (!Owns(id)) return;
+            dispatchIds.Remove(id);
             devTargets.Remove(id);
             DevArmedCars.Remove(id);
             List<PoliceUnit> list = new List<PoliceUnit>(Units(current));
@@ -184,6 +208,7 @@ reinforced=0; DevCasualties.Reset(); DevClearTargets(); CivicUnrest.DevResetArme
             List<PoliceUnit> valid = new List<PoliceUnit>();
             foreach (PoliceUnit u in Units(e)) if (Valid(e, u)) valid.Add(u);
             e.DeployedVehicle = e.DeployedStation = 0; e.Support = new PoliceUnit[0]; current = null;
+            dispatchIds.Clear();
             DevClearTargets();
             DevArmedCars.Clear();
             foreach (PoliceUnit u in valid)

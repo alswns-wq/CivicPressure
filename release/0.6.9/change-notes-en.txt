@@ -1,0 +1,24 @@
+[h1]0.6.9 — Clearer Complaints[/h1]
+
+[h2]Complaint Criteria & Guidance[/h2]
+[list]
+[*]The [?] beside complaint titles explains the criteria and possible solutions. Difficulties 1–3 show both, difficulty 4 shows criteria only, and difficulty 5 hides the button.
+[*]Education complaints now track actual school assignment shortages at unlocked education levels. School assignment and habitable housing shortages must persist for the same citizen for 3 in-game hours before being counted.
+[*]Crime and treatment waits must persist for the same target for 3 in-game hours. Citizens visiting a hospital for treatment are excluded from the treatment-wait count.
+[*]High fire risk alone no longer triggers fire-service shortage complaints or penalties where fire coverage is sufficient. Active fires are still counted separately.
+[*]Improved recurring-complaint comparisons with previous resolution times and recorded impact, plus guidance on resubmission after rejection.
+[/list]
+
+[h2]Protests, Riots & Police[/h2]
+[list]
+[*]Marches search nearby roads for a new route after roads are changed or demolished. Disconnected crowds wait and retry.
+[*]Improved crowd position continuity when protests escalate into riots.
+[*]Dispatched police cars retry after path failures or prolonged blockage. Repeated failures release the assignment and return the vehicle, allowing another dispatch request.
+[*]Added a confirmation-protected option to end the current protest or riot in Mod Options. Intended for error recovery. Outstanding complaints remain.
+[*]Arrest escorts now use a nearby police car parked at the scene.
+[*]Reduced excessive police and rioter body movement and refined nearby pose interpolation and walk/idle transitions.
+[/list]
+
+[h2]Save Notice[/h2]
+Saving ends ongoing vehicle assaults and clears empty damaged vehicles. If passenger state cannot be verified, saving is stopped to protect it.
+Existing saves can be loaded. Keep a separately named pre-update save if you may downgrade.

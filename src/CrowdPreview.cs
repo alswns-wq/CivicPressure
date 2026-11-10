@@ -21,6 +21,7 @@ namespace CivicPressure
 #endif
         private float nextPose, pendingDelta;
         private bool wasRiot, wasPolice;
+        private bool riotSeeded;
         private readonly List<CrowdActor> officers = new List<CrowdActor>();
         private readonly List<CitizenInfo> policeSkins = new List<CitizenInfo>();
 
@@ -39,7 +40,7 @@ namespace CivicPressure
                     if(devProfileFrames==0) devProfileAt=Time.realtimeSinceStartup;
                 } else { devProfileFrames=devProfileVisible=0; devProfileTotal=devProfileMotion=0; }
 #endif
-                if (!state.Active) { DevSuppressionReset(); DevStopAudio(); DevResetProtest(); }
+                if (!state.Active) { riotSeeded=false; DevSuppressionReset(); DevStopAudio(); DevResetProtest(); }
                 if (!state.Active)
                 {
                     foreach (CrowdActor actor in people) actor.Show(false);
@@ -63,7 +64,7 @@ namespace CivicPressure
                 Camera camera = Camera.main;
                 DevAudioTick(state,paused,camera);
                 if (state.Riot) {
-                    if(devProtestRoad!=null) DevResetProtest();
+                    if(!riotSeeded) { DevSeedRiotFromProtest(); DevResetProtest(); riotSeeded=true; }
 #if DEV
                     long motionStart=System.Diagnostics.Stopwatch.GetTimestamp();
 #endif
@@ -73,7 +74,7 @@ namespace CivicPressure
                     motionTicks=System.Diagnostics.Stopwatch.GetTimestamp()-motionStart;
 #endif
                 }
-                else DevProtestTick(state.DevRoad,animationDelta);
+                else { riotSeeded=false; DevProtestTick(state.DevRoad,animationDelta); }
                 if (!scanned) FindSkins();
                 int devCount = UnrestRules.CrowdCount(state.Riot);
                 for (int budget = 0; budget < 2 && people.Count < devCount; budget++)
@@ -110,6 +111,7 @@ namespace CivicPressure
                 {
                     CrowdActor actor = people[i];
                     if (i >= count) { actor.Show(false); continue; }
+                    if (state.Riot && !devRiotPlaced[i]) { actor.Show(false); continue; }
                     if (devRiotBorrowed[i]) continue;
                     // Combat owns its pose. Do not evaluate the same animator twice,
                     // or reactivate an actor that has already entered a building.
