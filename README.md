@@ -2,6 +2,16 @@
 
 A Cities: Skylines 1 mod that turns city problems into citizen complaints, administrative challenges, protests and riots.
 
+## Current status / 현재 상태
+
+**Released: 0.6.9-2 — Infrastructure Complaint Improvements.** This update distinguishes fire, police, and healthcare coverage from incidents awaiting a response, and groups deathcare warnings by the district where they occur. The Steam Workshop release and the [0.6.9-2 files](release/0.6.9-2/) are available.
+
+City Council is under development in a separate local development version, 0.7.3.4; it has not been released. The source in this repository is for the released 0.6.9-2 version.
+
+**출시: 0.6.9-2 — 인프라 민원 판정 개선.** 소방·치안·의료 서비스 범위와 실제 사건 대기를 구분하고, 시신 수거 경고는 현장 관할 구에 모읍니다. Steam 창작마당과 [0.6.9-2 배포 파일](release/0.6.9-2/)에서 확인할 수 있습니다.
+
+시의회는 별도의 로컬 개발본 0.7.3.4에서 개발 중이며 아직 출시되지 않았습니다. 이 저장소의 소스는 출시된 0.6.9-2 버전입니다.
+
 ## Features
 
 - Citizen complaints based on city conditions, with City Hall and district offices.
