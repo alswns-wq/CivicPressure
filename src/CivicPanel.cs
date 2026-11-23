@@ -302,10 +302,14 @@ namespace CivicPressure
                 else if(currentComplaint.Site!=null) {
                     if(!currentComplaint.Site.Position(out destination)) { status.text=L.T("현장이 변경되었습니다. 다시 집계해 주세요.");return; }
                 }
+                else if (currentComplaint.ServiceSite != null)
+                {
+                    if (!currentComplaint.ServiceSite.Position(out destination)) { status.text = L.T("현장이 변경되었습니다. 다시 집계해 주세요."); return; }
+                }
                 else {
                     if(currentComplaint.Home==null || !currentComplaint.Home.Position(out destination))return;
                 }
-                followingPolice = false; camera.ClearTarget(); camera.m_targetPosition = destination; camera.m_targetSize = currentComplaint.Home!=null || currentComplaint.Site!=null ? 60 : 120;
+                followingPolice = false; camera.ClearTarget(); camera.m_targetPosition = destination; camera.m_targetSize = currentComplaint.Home != null || currentComplaint.Site != null || currentComplaint.ServiceSite != null ? 60 : 120;
             };
             promise = Button(complaintsBody, L.T("수락"), 210, 292, 200, 32);
             promise.eventClick += delegate { DecideComplaint(true); };
@@ -446,14 +450,14 @@ namespace CivicPressure
                 for (int col = 0; col < 5; col++) cells[row, col].tooltip = Happiness.Reasons[reason] + L.T(": 미충족/피해 ") + affected.ToString("N0") + L.T("명 중 심각 ") + severe.ToString("N0") + L.T("명");
                 if (reason == 17) for (int col = 0; col < 5; col++) cells[row, col].tooltip += L.T("\n실제 대중교통 대기 시민 · 대기 카운터 64 이상 경고, 192 이상 또는 대기 포기 직전 심각 · 분 단위 시간 아님");
                 if (reason == 2) for (int col = 0; col < 5; col++) cells[row, col].tooltip += L.T("\n연결도로 교통 밀도 80 이상 경고 · 95 이상 심각 · 실제 통행속도 지표는 아님");
-                if (reason == 4 || reason == 5 || reason == 6 || reason == 14)
+                if (reason == 4 || reason == 5)
                     for (int col = 0; col < 5; col++) cells[row, col].tooltip += L.T("\n건물 상태 판정: 불량 방향 60%부터 경고, 80%부터 심각입니다. 실제 화재는 항상 심각입니다.");
                 if (reason >= 15 && reason <= 16) for (int col = 0; col < 5; col++) cells[row, col].tooltip += reason == 15 ? L.T("\n완성된 운영 노선의 정류장·역 반경 800m (직선거리) · 낮/밤 전용 노선 인정") : L.T("\n운영 중인 공원 시설 반경 600m (직선거리) · 장식용 나무·빈 공원 구역 제외");
                 if (reason >= 8 && reason < 13)
                 {
                     string[] requirements = { L.T("거주 가능한 완공 주택 필요 · 주거 상실은 심각"), L.T("학생을 제외한 청년·성인의 게임 실업 상태 기준 · 상업·공업·사무 수요와는 별개"),
-                        L.T("해금된 교육단계의 학교 미배정이 3게임 시간 지속 · 기존 주민 학력은 제외"), L.T("의료 서비스 범위 부족·불량 건물 건강·시민 건강 문제를 함께 확인"),
-                        L.T("치안 서비스 범위 부족과 건물 범죄 지표 60% 이상을 함께 확인 · 80% 이상은 심각") };
+                        L.T("해금된 교육단계의 학교 미배정이 3게임 시간 지속 · 기존 주민 학력은 제외"), L.T("의료 범위 밖 주택"),
+                        L.T("치안 범위 밖 주택") };
                     for (int col = 0; col < 5; col++) cells[row, col].tooltip += "\n" + requirements[reason - 8];
                 }
                 cells[row, 4].tooltip += L.T("\n환산 ") + weighted.ToString("N1") + ((ComplaintRules.Slow(reason) || reason >= 15) ? L.T("명분 · 완화 항목: 기본 2점 + 완화된 비율 감점") : L.T("명분 · 기본 12점 + 비율 감점")) + L.T("\n심각 인원은 1.5배 반영 · 종결 기준 이하 소수 피해는 비율에 따라 감점 축소");

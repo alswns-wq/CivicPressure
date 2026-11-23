@@ -29,7 +29,7 @@ namespace CivicPressure
         internal static string Version()
         {
             System.Version version = typeof(Edition).Assembly.GetName().Version;
-            return version.Major + "." + version.Minor + "." + version.Build;
+            return version.Revision > 0 ? version.ToString() : version.ToString(3);
         }
 
         // The other build of this mod, recognized by its assembly name and entry type.

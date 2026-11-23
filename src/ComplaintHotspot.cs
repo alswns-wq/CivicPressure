@@ -27,17 +27,54 @@ namespace CivicPressure
         internal ushort Building;
         internal uint BuildIndex;
         internal int Reason;
+        internal bool Matches(Building building)
+        {
+            return CivicSimulation.Live(building) && building.m_buildIndex == BuildIndex &&
+                (ComplaintMapping.Harms(building.m_problems) & (1 << Reason)) != 0;
+        }
         internal bool Position(out Vector3 position)
         {
             position=Vector3.zero;
             Building[] buildings=Singleton<BuildingManager>.instance.m_buildings.m_buffer;
             if(Building==0 || Building>=buildings.Length)return false;
             Building b=buildings[Building];
-            if(!CivicSimulation.Live(b) || b.m_buildIndex!=BuildIndex ||
-                (ComplaintMapping.Harms(b.m_problems)&(1<<Reason))==0)return false;
+            if (!Matches(b)) return false;
             position=b.m_position;return true;
         }
     }
+    internal enum ServiceComplaintCause { Deathcare, Fire, FireCoverage, MedicalCoverage, PoliceCoverage }
+
+    internal sealed class ServiceComplaintSite
+    {
+        internal ushort Building;
+        internal uint BuildIndex;
+        internal byte District;
+        internal ServiceComplaintCause Cause;
+        internal int Severity, ResidenceDistrict = -1;
+        internal double ObservedHours;
+
+        internal static bool Applies(int reason) { return reason >= 11 && reason <= 14; }
+
+        internal bool Matches(Building building)
+        {
+            if (!CivicSimulation.Live(building) || building.m_buildIndex != BuildIndex) return false;
+            if (Cause == ServiceComplaintCause.Deathcare) return CityCensus.AwaitingCollection(building);
+            if (Cause == ServiceComplaintCause.Fire) return building.m_fireIntensity > 0;
+            return CityCensus.MissingCoverage(building, Cause);
+        }
+
+        internal bool Position(out Vector3 position)
+        {
+            position = Vector3.zero;
+            Building[] buildings = Singleton<BuildingManager>.instance.m_buildings.m_buffer;
+            if (Building == 0 || Building >= buildings.Length) return false;
+            Building b = buildings[Building];
+            if (!Matches(b)) return false;
+            position = b.m_position;
+            return true;
+        }
+    }
+
     internal sealed class ComplaintHotspot
     {
         internal int Region,Reason,Affected,Severe,Density;

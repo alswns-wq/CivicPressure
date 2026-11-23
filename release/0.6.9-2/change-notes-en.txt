@@ -1,0 +1,8 @@
+[h1]0.6.9-2 · Clearer Service Complaints[/h1]
+[list]
+[*]Fire, police and healthcare complaints now identify occupied homes outside service coverage. Facilities in neighbouring districts count toward coverage.
+[*]A fire in a covered area counts as a delayed response after the same building has been burning for three game hours. Persistent crime and untreated illness are assessed separately from police and healthcare coverage.
+[*]A single building with a deathcare warning can trigger a complaint in its own district. Additional sites join that complaint. Two waiting sites, or six game hours at one site, mark it as severe.
+[*]Service complaints show affected locations on the map. Chirper posts when a complaint is filed and when its severity first increases.
+[/list]
+This update keeps the existing CP save format.

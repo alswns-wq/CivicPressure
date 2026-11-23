@@ -118,8 +118,13 @@ namespace CivicPressure
         // The complaint's intake time has come (the moment it would open without a visit).
         internal static bool IntakeDue(ComplaintRecord c, int affected, int severe, int residents, long now)
         {
-            if (c.Open || c.Reason == ComplaintRules.OddReason || affected <= 0 || residents <= 0 || c.Since == 0 || now < c.QuietUntil) return false;
-            if (ComplaintRules.Rate(affected, severe, residents) <= ComplaintRules.OpenRatio(c.Reason)) return false;
+            return IntakeDue(c, affected, severe, residents, now, false);
+        }
+
+        internal static bool IntakeDue(ComplaintRecord c, int affected, int severe, int residents, long now, bool incident)
+        {
+            if (c.Open || c.Reason == ComplaintRules.OddReason || c.Since == 0 || now < c.QuietUntil) return false;
+            if (!incident && ComplaintRules.Rate(affected, severe, residents) <= ComplaintRules.OpenRatio(c.Reason)) return false;
             return now - c.Since >= GameClock.Hours(ComplaintRules.IntakeHours(c.Reason));
         }
 

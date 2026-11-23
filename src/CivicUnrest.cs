@@ -331,7 +331,8 @@ namespace CivicPressure
             if (e == null)
             {
                 closure = null;
-                if (CivicRecords.Notice != null && (!CivicRecords.Needed(CivicRecords.Notice, city) || !CivicComplaints.Ready(CivicRecords.Notice.Origin, now.Ticks) || protestRate <= 0))
+                bool rechecking = CivicComplaints.RecheckingNotice(CivicRecords.Notice);
+                if (CivicRecords.Notice != null && !rechecking && (!CivicRecords.Needed(CivicRecords.Notice, city) || !CivicComplaints.Ready(CivicRecords.Notice.Origin, now.Ticks) || protestRate <= 0))
                 {
                     CivicChirper.PostText(CivicRecords.Notice.Area + L.T(" 집회 예고를 취소합니다. 생활 여건 개선 또는 발생 조건 변경이 확인되었습니다. #집회취소"));
                     CivicRecords.Notice = null; if (!manualSearch) search = null;
@@ -363,7 +364,7 @@ namespace CivicPressure
                 }
                 else if (CivicRecords.Notice != null)
                 {
-                    if (now.Ticks >= CivicRecords.Notice.Due && city.CityHallOperating) search = new MarchSearch(CivicRecords.Notice.Origin, FirstHall(city, CivicRecords.Notice.Origin, false), Random);
+                    if (!rechecking && now.Ticks >= CivicRecords.Notice.Due && city.CityHallOperating) search = new MarchSearch(CivicRecords.Notice.Origin, FirstHall(city, CivicRecords.Notice.Origin, false), Random);
                 }
                 else if (hourly && now.Ticks >= state.NextEligible && city.CityHallOperating && city.All != null && protestRate > 0 && CivicRecords.Available)
                 {

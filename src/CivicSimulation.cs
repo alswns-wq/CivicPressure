@@ -182,6 +182,7 @@ namespace CivicPressure
                 active = false;
                 GameClock.Reset();
                 CityCensus.CrimeWait.Clear(); CityCensus.MedicalWait.Clear(); CityCensus.EducationWait.Clear(); CityCensus.HousingWait.Clear();
+                CityCensus.DeathcareWait.Clear(); CityCensus.FireWait.Clear();
                 citySession = false;
                 CivicUnrest.Reset();
                 CivicComplaints.Reset(); nextComplaints = 0; promiseKey = -1;
@@ -259,6 +260,7 @@ namespace CivicPressure
                     double clockFactor = GameClock.Synchronize(simulation.m_timePerFrame.Ticks, SimulationManager.DAYTIME_FRAMES);
                     if (clockFactor != 1) {
                         CityCensus.CrimeWait.Rebase(now.Ticks, clockFactor);
+                        CityCensus.DeathcareWait.Rebase(now.Ticks, clockFactor); CityCensus.FireWait.Rebase(now.Ticks, clockFactor);
                         CityCensus.MedicalWait.Rebase(now.Ticks, clockFactor); CityCensus.EducationWait.Rebase(now.Ticks, clockFactor); CityCensus.HousingWait.Rebase(now.Ticks, clockFactor);
                         CivicComplaints.Rebase(now.Ticks, clockFactor);
                         CivicRecords.Rebase(now.Ticks, clockFactor);
@@ -361,7 +363,7 @@ namespace CivicPressure
             Debug.Log("[CivicPressure] Administration changed: action=" + request.Action + ", building=" + id + ", district=" + district);
         }
 
-        private static string BuildingName(ushort id)
+        internal static string BuildingName(ushort id)
         {
             return Singleton<BuildingManager>.instance.GetBuildingName(id, default(InstanceID));
         }

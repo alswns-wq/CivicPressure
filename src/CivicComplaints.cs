@@ -25,6 +25,7 @@ namespace CivicPressure
         internal string Title, Detail, Road, Stage, LocationLabel;
         internal double Hours;
         internal bool CanPromise, CanReject, CanAgree, HasRoad, Odd, Improving; internal ComplaintHome Home; internal ComplaintSite Site; internal ComplaintHotspot Hotspot;
+        internal ServiceComplaintSite ServiceSite;
         internal uint Visitor;
         internal ComplaintKind Kind;
         internal Vector3 Position;
@@ -59,6 +60,19 @@ namespace CivicPressure
         private static long nextOddCheck;
         private static readonly Dictionary<int,ComplaintHome> homes=new Dictionary<int,ComplaintHome>(); private static readonly int[,] localAffected=new int[256,2], localSevere=new int[256,2];
         private static readonly Dictionary<int,ComplaintSite> sites=new Dictionary<int,ComplaintSite>();
+        private static readonly Dictionary<int, List<CityCensus.ServiceImpact>> serviceSites =
+            new Dictionary<int, List<CityCensus.ServiceImpact>>();
+        private struct ServiceTotals
+        {
+            internal int Homes, Residents, Incidents, Severe;
+            internal bool Observing;
+            internal bool Escalated(int reason) { return Severe > 0 || (reason == 13 && Incidents >= 2); }
+        }
+        private static readonly Dictionary<int, ServiceTotals> serviceTotals = new Dictionary<int, ServiceTotals>();
+        private static bool serviceCensusReady;
+        private static readonly int[] pendingWaits = new int[256];
+        private static bool ObservedService(int reason)
+        { return reason == 5 || reason == 6 || ServiceComplaintSite.Applies(reason); }
         internal static bool Local(int reason) { return reason==2 || reason==17; }
         internal static int Affected(RegionView area,int region,int reason)
         { return area==null ? 0 : Local(reason) ? localAffected[region,reason==2?0:1] : area.Affected[reason]; }
@@ -69,10 +83,17 @@ namespace CivicPressure
         private static readonly Dictionary<int,ComplaintHotspot> hotspots=new Dictionary<int,ComplaintHotspot>();
         private static readonly Dictionary<int, RoadResidents[]> worst = new Dictionary<int, RoadResidents[]>();
         internal static string Error { get { return preserved == null ? "" : L.T("민원 저장 데이터 오류 · 원본 보존 중"); } }
-        internal static void Reset() { records.Clear(); CivicVisits.Reset(); CivicStanding.Reset(); worst.Clear();hotspots.Clear();homes.Clear();sites.Clear(); Array.Clear(localAffected,0,localAffected.Length); Array.Clear(localSevere,0,localSevere.Length); preserved = null; nextOddCheck = 0; }
+        internal static void Reset() { records.Clear(); CivicVisits.Reset(); CivicStanding.Reset(); worst.Clear();hotspots.Clear();homes.Clear();sites.Clear(); serviceSites.Clear(); serviceTotals.Clear(); serviceCensusReady = false; Array.Clear(localAffected,0,localAffected.Length); Array.Clear(localSevere,0,localSevere.Length); preserved = null; nextOddCheck = 0; }
         internal static void Load(byte[] bytes)
         {
-            try { foreach (ComplaintRecord c in ComplaintSave.Decode(bytes)) records[c.Region * ComplaintRules.Slots + c.Reason] = c; }
+            try
+            {
+                foreach (ComplaintRecord c in ComplaintSave.Decode(bytes))
+                {
+                    c.RecheckingService = c.Open && ObservedService(c.Reason);
+                    records[c.Region * ComplaintRules.Slots + c.Reason] = c;
+                }
+            }
             catch (Exception e) { records.Clear(); preserved = bytes; Debug.LogError("[CivicPressure] Complaint save preserved: " + e); }
         }
         internal static byte[] Save()
@@ -87,6 +108,22 @@ namespace CivicPressure
         internal static void Census(CityCensus census)
         {
             worst.Clear();hotspots.Clear();homes.Clear();sites.Clear(); Array.Clear(localAffected,0,localAffected.Length); Array.Clear(localSevere,0,localSevere.Length);
+            serviceSites.Clear();
+            serviceTotals.Clear();
+            serviceCensusReady = true;
+            Array.Copy(census.PendingByDistrict, pendingWaits, pendingWaits.Length);
+            foreach (KeyValuePair<int, Dictionary<ushort, CityCensus.ServiceImpact>> entry in census.ServiceSites)
+            {
+                List<CityCensus.ServiceImpact> ordered = new List<CityCensus.ServiceImpact>(entry.Value.Values);
+                ordered.Sort(delegate(CityCensus.ServiceImpact a, CityCensus.ServiceImpact b) {
+                    int severity = b.Site.Severity.CompareTo(a.Site.Severity);
+                    if (severity != 0) return severity;
+                    int residents = b.Residents.CompareTo(a.Residents);
+                    return residents != 0 ? residents : a.Site.Building.CompareTo(b.Site.Building);
+                });
+                serviceSites.Add(entry.Key, ordered);
+                serviceTotals.Add(entry.Key, CountSites(ordered));
+            }
             if(census.Homes!=null)foreach(KeyValuePair<int,ComplaintHome> home in census.Homes)homes.Add(home.Key,home.Value);
             if(census.Sites!=null)foreach(KeyValuePair<int,ComplaintSite> site in census.Sites)sites.Add(site.Key,site.Value);
             foreach(ComplaintHotspot spot in census.Hotspots.Values){
@@ -99,7 +136,7 @@ namespace CivicPressure
             {
                 for (int reason = 0; reason < ComplaintRules.ReasonCount; reason++)
                 {
-                    if (reason==2 || reason==17 || road.Affected[reason] == 0) continue;
+                    if (reason==2 || reason==17 || ServiceComplaintSite.Applies(reason) || road.Affected[reason] == 0) continue;
                     int key = road.Region * ComplaintRules.Slots + reason;
                     RoadResidents[] top;
                     if (!worst.TryGetValue(key, out top)) { top = new RoadResidents[3]; worst.Add(key, top); }
@@ -113,11 +150,90 @@ namespace CivicPressure
             }
         }
         private static double Priority(RoadResidents r, int reason) { return ComplaintRules.RoadPriority(r.Affected[reason], r.Severe[reason], r.Residents); }
+        private static ServiceTotals CountSites(List<CityCensus.ServiceImpact> locations)
+        {
+            ServiceTotals totals = new ServiceTotals();
+            foreach (CityCensus.ServiceImpact impact in locations)
+            {
+                ServiceComplaintSite site = impact.Site;
+                Vector3 position;
+                if (!site.Position(out position)) continue;
+                site.ResidenceDistrict = impact.ResidenceDistrict;
+                if (site.Severity == 0) { totals.Observing = true; continue; }
+                if (site.Cause == ServiceComplaintCause.Fire || site.Cause == ServiceComplaintCause.Deathcare)
+                {
+                    totals.Incidents++;
+                    if (site.Severity == 2) totals.Severe++;
+                }
+                else { totals.Homes++; totals.Residents += impact.Residents; }
+            }
+            return totals;
+        }
+
+        internal static bool ServiceRecovered(int region, int reason, int residents)
+        {
+            ServiceTotals totals;
+            serviceTotals.TryGetValue(region * ComplaintRules.Slots + reason, out totals);
+            return totals.Incidents == 0 && ComplaintRules.Recovered(reason, totals.Residents, 0, residents);
+        }
+
+        private static string ServiceLocation(CityView city, int region, ServiceComplaintSite site)
+        {
+            string cause;
+            switch (site.Cause)
+            {
+                case ServiceComplaintCause.Deathcare: cause = L.T("시신 수거 대기"); break;
+                case ServiceComplaintCause.Fire: cause = L.T("화재 대응 지연"); break;
+                case ServiceComplaintCause.PoliceCoverage: cause = L.T("치안 범위 밖 주택"); break;
+                case ServiceComplaintCause.MedicalCoverage: cause = L.T("의료 범위 밖 주택"); break;
+                default: cause = L.T("소방 범위 밖 주택"); break;
+            }
+            string text = CivicSimulation.BuildingName(site.Building) + " · " + cause;
+            if (site.Cause == ServiceComplaintCause.Fire || site.Cause == ServiceComplaintCause.Deathcare)
+                text += " · " + string.Format(L.T("{0:0.#}게임 시간 관찰"), site.ObservedHours);
+            return text + ServiceDistrictLabel(city, site.ResidenceDistrict < 0 ? region : site.ResidenceDistrict, site.District);
+        }
+
+        private static string ServiceDistrictLabel(CityView city, int residenceDistrict, byte siteDistrict)
+        {
+            if (residenceDistrict == siteDistrict) return "";
+            RegionView district = city.Regions[siteDistrict];
+            RegionView residents = city.Regions[residenceDistrict];
+            return district == null || residents == null ? "" :
+                "\n" + string.Format(L.T("{0} 현장 · {1} 주민 피해"), district.Name, residents.Name);
+        }
+
+        private static ServiceComplaintSite FirstLiveServiceSite(int key, bool rechecking, out Vector3 position)
+        {
+            List<CityCensus.ServiceImpact> locations;
+            if (serviceSites.TryGetValue(key, out locations))
+                foreach (CityCensus.ServiceImpact impact in locations)
+                    if ((impact.Site.Severity > 0 || rechecking) && impact.Site.Position(out position)) return impact.Site;
+            position = Vector3.zero;
+            return null;
+        }
         internal static ComplaintMarker[] Markers(CityView city)
         {
             List<ComplaintMarker> list=new List<ComplaintMarker>();
             foreach(ComplaintRecord c in records.Values) {
                 if(!c.Open || c.Reason==ComplaintRules.OddReason) continue;
+                if (ServiceComplaintSite.Applies(c.Reason))
+                {
+                    List<CityCensus.ServiceImpact> locations;
+                    int key = c.Region * ComplaintRules.Slots + c.Reason;
+                    if (!serviceSites.TryGetValue(key, out locations)) continue;
+                    int shown = 0;
+                    foreach (CityCensus.ServiceImpact impact in locations)
+                    {
+                        Vector3 position;
+                        if ((impact.Site.Severity == 0 && !c.RecheckingService) || !impact.Site.Position(out position)) continue;
+                        list.Add(new ComplaintMarker { Key = key, Region = c.Region, Stamp = c.Since, Position = position,
+                            Text = ServiceLocation(city, c.Region, impact.Site), Severe = impact.Site.Severity == 2,
+                            Priority = impact.Residents * (impact.Site.Severity == 2 ? 1.5 : 1) });
+                        if (++shown == 3) break;
+                    }
+                    continue;
+                }
                 if(c.Reason==2 || c.Reason==17){
                     ComplaintHotspot spot;
                     if(hotspots.TryGetValue(c.Region*ComplaintRules.Slots+c.Reason,out spot) && spot.Live())
@@ -163,7 +279,12 @@ namespace CivicPressure
                 {
                     int key = region * ComplaintRules.Slots + reason;
                     ComplaintRecord c;
-                    bool problem = Affected(area,region,reason) > 0;
+                    bool service = ServiceComplaintSite.Applies(reason);
+                    ServiceTotals totals = new ServiceTotals();
+                    if (ObservedService(reason) && !serviceCensusReady) continue;
+                    if (service && area != null) serviceTotals.TryGetValue(key, out totals);
+                    bool incident = totals.Incidents > 0;
+                    bool problem = service ? incident || totals.Residents > 0 : Affected(area,region,reason) > 0;
                     if (!records.TryGetValue(key, out c))
                     {
                         if (!problem) continue;
@@ -171,17 +292,42 @@ namespace CivicPressure
                     }
                     bool wasOpen = c.Open;
                     bool wasPromised = c.Promised; long detected = c.Since;
+                    int affected = Affected(area, region, reason), severe = Severe(area, region, reason);
+                    int residents = Population(area, region, reason);
+                    bool rechecking = c.RecheckingService;
+                    if (service)
+                    {
+                        if (!wasOpen && problem && (incident || ComplaintRules.Rate(totals.Residents, 0, residents) > ComplaintRules.OpenRatio(reason)) && now.Ticks >= c.QuietUntil &&
+                            (c.Since == 0 || now.Ticks - c.Since >= GameClock.Hours(ComplaintRules.IntakeHours(reason))))
+                        {
+                            totals = CountSites(serviceSites[key]);
+                            serviceTotals[key] = totals;
+                            incident = totals.Incidents > 0;
+                        }
+                        affected = totals.Residents;
+                        severe = 0;
+                        if (rechecking && !incident && affected == 0 && totals.Observing) continue;
+                        c.RecheckingService = false;
+                    }
+                    else if (rechecking)
+                    {
+                        if (affected == 0 && (pendingWaits[region] & (1 << reason)) != 0) continue;
+                        c.RecheckingService = false;
+                    }
+                    problem = incident || affected > 0;
                     // In-person complaints: near the office the complaint opens only once a resident arrives (CivicVisits).
                     if (!c.Open)
                     {
                         ComplaintHome visitor;
                         homes.TryGetValue(key, out visitor);
-                        if (VisitRules.IntakeDue(c, Affected(area,region,reason), Severe(area,region,reason), Population(area,region,reason), now.Ticks))
+                        if (VisitRules.IntakeDue(c, affected, severe, residents, now.Ticks, incident))
                         { if (CivicVisits.Hold(key, c, city, visitor, now.Ticks)) continue; }
                         else CivicVisits.Cancel(key);
                     }
                     bool visited = !wasOpen && CivicVisits.ConsumeArrival(key);
-                    if (ComplaintRules.UpdateCounts(c, Affected(area,region,reason), Severe(area,region,reason), Population(area,region,reason), now.Ticks))
+                    if (incident) c.ImprovingSince = 0;
+                    if (incident ? ComplaintRules.Update(c, true, now.Ticks) :
+                        ComplaintRules.UpdateCounts(c, affected, severe, residents, now.Ticks))
                     {
                         if(wasOpen && area!=null) ComplaintRecurrence.Solved(region,reason,now.Ticks);
                         if(!wasOpen) { int penalty=ComplaintRecurrence.Opened(c,now.Ticks); if(area!=null && area.OfficeId!=0) CivicRecords.ChangeTrust(region,-penalty); }
@@ -190,18 +336,28 @@ namespace CivicPressure
                         if(wasOpen && !c.Open) CivicStanding.Resolved();
                         if(wasOpen) {
                             RegionView historyArea=area;
-                            if(area!=null && Local(reason)) {
+                            if(area!=null && (Local(reason) || ServiceComplaintSite.Applies(reason))) {
                                 historyArea=new RegionView{Name=area.Name,Office=area.Office,OfficeId=area.OfficeId,ServiceOffice=area.ServiceOffice,ServiceOfficeId=area.ServiceOfficeId,OfficeTransferred=area.OfficeTransferred,Affected=(int[])area.Affected.Clone()};
-                                historyArea.Affected[reason]=Affected(area,region,reason);
+                                historyArea.Affected[reason]=service ? area.Affected[reason] : affected;
                             }
                             ComplaintHistory.Resolved(region, reason, detected, now.Ticks, wasPromised, historyArea, city.CityHall);
                         }
                         if(wasOpen && area!=null && area.OfficeId!=0) CivicRecords.ChangeTrust(region,wasPromised ? 4 : 2);
-                        News(c, city, wasOpen ? (problem ? L.T("낮은 피해 비율이 3시간 유지되어 개선 확인 후 종결했습니다. 잔여 피해는 비율에 따라 행복도에 반영됩니다.") : L.T("민원이 해결되었습니다.")) : (ComplaintRecurrence.Badge(c).Length>0 ? L.T("동일 문제가 다시 접수되었습니다.")+ComplaintRecurrence.Badge(c)+L.T(". 대응 기한은 ") : visited ? L.T("주민이 행정청을 직접 방문해 민원을 접수했습니다. 대응 기한은 ") : L.T("민원이 접수되었습니다. 대응 기한은 ")) + ((c.Deadline-now.Ticks)/(double)GameClock.HourTicks).ToString("0.#") + L.T("게임 시간입니다."));
+                        if (!ObservedService(reason) || !wasOpen) News(c, city, wasOpen ? (problem ? L.T("낮은 피해 비율이 3시간 유지되어 개선 확인 후 종결했습니다. 잔여 피해는 비율에 따라 행복도에 반영됩니다.") : L.T("민원이 해결되었습니다.")) : (ComplaintRecurrence.Badge(c).Length>0 ? L.T("동일 문제가 다시 접수되었습니다.")+ComplaintRecurrence.Badge(c)+L.T(". 대응 기한은 ") : visited ? L.T("주민이 행정청을 직접 방문해 민원을 접수했습니다. 대응 기한은 ") : L.T("민원이 접수되었습니다. 대응 기한은 ")) + ((c.Deadline-now.Ticks)/(double)GameClock.HourTicks).ToString("0.#") + L.T("게임 시간입니다."));
+                    }
+                    if (ObservedService(reason))
+                    {
+                        bool escalated = service ? totals.Escalated(reason) : severe > 0;
+                        if (!wasOpen || rechecking || !c.Open) c.ServiceAlerted = c.Open && escalated;
+                        else if (!c.ServiceAlerted && escalated)
+                        {
+                            c.ServiceAlerted = true;
+                            News(c, city, L.T("현장 상황이 심각해졌습니다."));
+                        }
                     }
                     CivicRecords.Deadline(c,city,now.Ticks);
                     if (c.Open && c.ImprovingSince == 0 && !c.Warned && now.Ticks >= c.Deadline - GameClock.Hours(6))
-                    { c.Warned = true; News(c, city, L.T("민원 대응 기한이 임박했습니다.")); }
+                    { c.Warned = true; if (!ObservedService(reason)) News(c, city, L.T("민원 대응 기한이 임박했습니다.")); }
                 }
             }
             TickOdd(city, now);
@@ -277,16 +433,30 @@ namespace CivicPressure
         internal static bool Ready(int origin, long now)
         {
             foreach (ComplaintRecord c in records.Values)
-                if ((origin < 0 || c.Region == origin) && ComplaintRules.Escalates(c, now)) return true;
+                if ((origin < 0 || c.Region == origin) && !c.RecheckingService && ComplaintRules.Escalates(c, now)) return true;
+            return false;
+        }
+        internal static bool RecheckingNotice(RallyNotice notice)
+        {
+            if (notice == null || !ObservedService(notice.Reason)) return false;
+            foreach (ComplaintRecord c in records.Values)
+                if (c.RecheckingService && c.Open && c.Reason == notice.Reason && c.Since == notice.Since &&
+                    (notice.Origin < 0 || c.Region == notice.Origin)) return true;
             return false;
         }
         internal static RallyNotice PrepareNotice(int origin, CityView city, DateTime now)
         {
             ComplaintRecord selected = null;
             foreach (ComplaintRecord c in records.Values)
-                if ((origin < 0 || c.Region == origin) && ComplaintRules.Escalates(c, now.Ticks) && (selected == null || c.Since < selected.Since)) selected = c;
+                if ((origin < 0 || c.Region == origin) && !c.RecheckingService && ComplaintRules.Escalates(c, now.Ticks) && (selected == null || c.Since < selected.Since)) selected = c;
             if (selected == null) return null;
             string road = L.T("주요 피해 도로 미확인"); RoadResidents[] top;
+            if (ServiceComplaintSite.Applies(selected.Reason))
+            {
+                Vector3 position;
+                ServiceComplaintSite site = FirstLiveServiceSite(selected.Region * ComplaintRules.Slots + selected.Reason, false, out position);
+                if (site != null) road = CivicSimulation.BuildingName(site.Building);
+            }
             if (worst.TryGetValue(selected.Region * ComplaintRules.Slots + selected.Reason, out top) && LiveRoad(top[0])) road = Singleton<NetManager>.instance.GetSegmentName(top[0].Road);
             ComplaintHotspot location;
             if(Local(selected.Reason) && hotspots.TryGetValue(selected.Region*ComplaintRules.Slots+selected.Reason,out location) && location.Live())road=location.Label();
@@ -300,6 +470,7 @@ namespace CivicPressure
                 if (c.Reason != ComplaintRules.OddReason && (origin < 0 || c.Region == origin) && c.Open)
                 {
                     any = true;
+                    if (c.RecheckingService) continue;
                     if (c.OfficeUntil == 0) c.OfficeUntil = now + GameClock.Hours(Difficulty.OfficeHours * (ComplaintRules.Labor(c.Reason) ? 3 : 1));
                     if (now >= c.OfficeUntil) return true;
                 }
@@ -316,11 +487,12 @@ namespace CivicPressure
             ComplaintRecord c;
             if (key >= CivicStanding.OppositionKeyBase) { CivicStanding.Decide(key, stamp, accept, agree, city, now); return; }
             if (agree) return;
-            if (preserved != null || !records.TryGetValue(key, out c)) return;
+            if (preserved != null || !records.TryGetValue(key, out c) || c.RecheckingService) return;
             long previousDeadline=c.Deadline;
             if(!ComplaintRules.Decide(c, stamp, accept, now.Ticks)) return;
             if(accept) ComplaintRecurrence.AdjustPromise(c,previousDeadline);
             if(!accept && c.Reason!=ComplaintRules.OddReason && city.Regions[c.Region]!=null && city.Regions[c.Region].OfficeId!=0) CivicRecords.ChangeTrust(c.Region,-2);
+            if (ObservedService(c.Reason)) return;
             string message = accept ? (c.Reason == ComplaintRules.OddReason ? L.T("검토를 접수했습니다. 6게임 시간 뒤 답변합니다.") : L.T("개선 요청을 수락했습니다. 대응 기한을 한 차례 연장합니다.")) :
                 c.Reason == ComplaintRules.OddReason ? L.T("기타 요구를 거절하고 종결했습니다.") : L.T("요청을 거절했습니다. 실제 생활 문제와 행복도 감점은 남아 있습니다.");
             CivicChirper.PostComplaint((city.Regions[c.Region] == null ? L.T("지역") : city.Regions[c.Region].Name) + " · " + message, city, c.Region);
@@ -358,12 +530,12 @@ namespace CivicPressure
                     continue;
                 }
                 ComplaintView v = new ComplaintView { Key = pair.Key, Region = c.Region,
-                    Stamp = c.Since, CanReject = !c.Promised,
+                    Stamp = c.Since, CanReject = !c.RecheckingService && !c.Promised,
                     Title = area.Name + " · " + Happiness.Reasons[c.Reason] + ComplaintRecurrence.Badge(c),
                     Detail = L.T("구 전체 기준 · 피해 ") + Affected(area,c.Region,c.Reason).ToString("N0") + L.T("명 · 심각 ") + Severe(area,c.Region,c.Reason).ToString("N0") + L.T("명"),
                     Stage = area.OfficeTransferred ? area.TransferStage : area.OfficeId != 0 ? area.Name + L.T(" 구청 담당") : L.T("시청 직접 담당"),
                     Hours = Math.Max(0, (c.Deadline - now.Ticks) / (double)GameClock.HourTicks),
-                    CanPromise = !c.Promised && now.Ticks < c.Deadline,
+                    CanPromise = !c.RecheckingService && !c.Promised && now.Ticks < c.Deadline,
                     Road = L.T("문제 도로: 확인 가능한 주거지 도로 없음") };
                 string recurrence=ComplaintRecurrence.Detail(c);
 #if DEV
@@ -398,7 +570,22 @@ namespace CivicPressure
                         v.Road=spot.Label()+L.T("\n관할 현장 피해 시민 ")+spot.Affected.ToString("N0")+L.T("명")+(c.Reason==17?L.T(" · 대기 지연"):L.T(" · 교통 밀도 ")+spot.Density);
                     }
                 }
-                if(!Local(c.Reason)) {
+                if (ServiceComplaintSite.Applies(c.Reason))
+                {
+                    ServiceTotals totals;
+                    serviceTotals.TryGetValue(pair.Key, out totals);
+                    v.Detail = string.Format(L.T("범위 밖 주택 {0}곳 · 대응 대기 현장 {1}곳"), totals.Homes, totals.Incidents);
+                    if (totals.Escalated(c.Reason)) v.Detail += " · " + L.T("심각");
+                    if (recurrence.Length > 0) v.Detail += "\n" + recurrence;
+                    Vector3 position;
+                    v.ServiceSite = FirstLiveServiceSite(pair.Key, c.RecheckingService, out position);
+                    v.HasRoad = v.ServiceSite != null;
+                    v.Position = position;
+                    v.LocationLabel = L.T("문제 장소 보기");
+                    v.Road = v.ServiceSite == null ? L.T("최근 집계에서 유효한 현장을 찾지 못했습니다.") :
+                        ServiceLocation(city, c.Region, v.ServiceSite);
+                }
+                else if(!Local(c.Reason)) {
                     v.HasRoad=false;v.LocationLabel=L.T("문제 장소 보기");
                     if(c.Reason>=19 && c.Reason<=24) {
                         ComplaintSite site;Vector3 sitePosition;
@@ -418,17 +605,17 @@ namespace CivicPressure
                     }
                 }
                 double rate = ComplaintRules.Rate(Affected(area,c.Region,c.Reason), Severe(area,c.Region,c.Reason), Population(area,c.Region,c.Reason)) * 100;
-                if (c.Reason == 5 || c.Reason == 6 || c.Reason == 11 || c.Reason == 12)
+                if (c.Reason == 5 || c.Reason == 6)
                     v.Detail += "\n" + L.T("범죄·치료 대기는 같은 대상에서 3게임 시간 지속 관찰 후 집계합니다. 치료 중인 시민은 제외하며, 도시를 불러오면 관찰을 다시 시작합니다.");
-                if (c.Reason == 14) v.Detail += "\n" + L.T("소방 범위가 있는 건물의 위험만으로는 민원·감점하지 않습니다. 실제 화재는 별도로 집계합니다.");
-                if (c.Reason == 4 || c.Reason == 5 || c.Reason == 12 || c.Reason == 14)
+                if (c.Reason == 4 || c.Reason == 5)
                     v.Detail += L.T("\n건물 상태 판정: 불량 방향 60%부터 경고, 80%부터 심각입니다. 실제 화재는 항상 심각입니다.");
                 if (c.Reason == 10) v.Detail += "\n" + L.T("해금된 교육단계의 학교 미배정이 3게임 시간 지속 · 기존 주민 학력은 제외");
                 if (c.LaborExtended) v.Detail += L.T("\n고용 피해율 20% 감소 확인 · 추가 대응 시간 지급 완료");
-                v.Road += "\n\n" + (Local(c.Reason) ? L.T("현장 관할 기준 환산 피해 ") : L.T("구 전체 환산 피해 ")) + rate.ToString("0.###") + L.T("% · 접수 > ") +
+                if (!ServiceComplaintSite.Applies(c.Reason)) v.Road += "\n\n" + (Local(c.Reason) ? L.T("현장 관할 기준 환산 피해 ") : L.T("구 전체 환산 피해 ")) + rate.ToString("0.###") + L.T("% · 접수 > ") +
                     (ComplaintRules.OpenRatio(c.Reason)*100).ToString("0.###") + L.T("% · 종결 ≤ ") +
                     (ComplaintRules.CloseRatio(c.Reason)*100).ToString("0.###") + L.T("% (3시간 유지)");
-                if (c.ImprovingSince > 0) {
+                if (c.RecheckingService) v.Stage += L.T(" · 현장 재확인 중");
+                else if (c.ImprovingSince > 0) {
                     v.Improving = true;
                     v.Hours = Math.Max(0, 3 - (now.Ticks - c.ImprovingSince) / (double)GameClock.HourTicks);
                     v.Stage += L.T(" · 개선 확인 중 (3시간 유지 후 종결)");

@@ -10,11 +10,15 @@ namespace CivicPressure
         private readonly Dictionary<uint, Entry> entries = new Dictionary<uint, Entry>();
         internal bool Observe(uint id, uint identity, bool waiting, long now)
         {
-            if (!waiting) { entries.Remove(id); return false; }
+            return ObserveDuration(id, identity, waiting, now) >= GameClock.Hours(3);
+        }
+        internal long ObserveDuration(uint id, uint identity, bool waiting, long now)
+        {
+            if (!waiting) { entries.Remove(id); return 0; }
             Entry entry;
             if (!entries.TryGetValue(id, out entry) || entry.Identity != identity || now < entry.Since)
             { entry = new Entry { Identity = identity, Since = now }; entries[id] = entry; }
-            return now - entry.Since >= GameClock.Hours(3);
+            return now - entry.Since;
         }
         internal void Forget(uint id) { entries.Remove(id); }
         internal void Clear() { entries.Clear(); }

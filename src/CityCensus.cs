@@ -8,14 +8,27 @@ namespace CivicPressure
     {
         internal static readonly ServiceWait CrimeWait = new ServiceWait(), MedicalWait = new ServiceWait();
         internal static readonly ServiceWait EducationWait = new ServiceWait(), HousingWait = new ServiceWait();
+        internal static readonly ServiceWait DeathcareWait = new ServiceWait(), FireWait = new ServiceWait();
         private readonly bool[] schoolUnlocked = new bool[3];
         internal static void ForgetCitizen(uint id)
         { MedicalWait.Forget(id); EducationWait.Forget(id); HousingWait.Forget(id); }
-        private struct Sample { internal byte District; internal int Harms, Severe, Needs; }
+        private struct Sample
+        {
+            internal byte District;
+            internal int Harms, Severe, Needs, Pending;
+            internal ServiceComplaintSite Deathcare, Fire, FireCoverage, MedicalCoverage, PoliceCoverage;
+        }
+        internal sealed class ServiceImpact
+        {
+            internal ServiceComplaintSite Site;
+            internal int Residents;
+            internal int ResidenceDistrict = -1;
+        }
         private readonly Sample[] samples;
         internal readonly int[] Residents = new int[256], Buildings = new int[256], Abandoned = new int[256], Warning = new int[256], Major = new int[256];
         internal readonly int[][] Affected = new int[256][], Severe = new int[256][];
         internal int Created, NoHome;
+        internal readonly int[] PendingByDistrict = new int[256];
         internal readonly int[] Housed = new int[256];
         internal int Unlocated;
         internal readonly int[] UnlocatedAffected = new int[26], UnlocatedSevere = new int[26];
@@ -23,6 +36,50 @@ namespace CivicPressure
         internal readonly HotspotCensus Hotspots=new HotspotCensus();
         internal readonly Dictionary<int,ComplaintHome> Homes=new Dictionary<int,ComplaintHome>();
         internal readonly Dictionary<int,ComplaintSite> Sites=new Dictionary<int,ComplaintSite>();
+        internal readonly Dictionary<int, Dictionary<ushort, ServiceImpact>> ServiceSites =
+            new Dictionary<int, Dictionary<ushort, ServiceImpact>>();
+        private void RememberService(int residence, int reason, ServiceComplaintSite site)
+        {
+            if (site == null) return;
+            int key = site.District * ComplaintRules.Slots + reason;
+            Dictionary<ushort, ServiceImpact> buildings;
+            if (!ServiceSites.TryGetValue(key, out buildings))
+            {
+                buildings = new Dictionary<ushort, ServiceImpact>();
+                ServiceSites.Add(key, buildings);
+            }
+            ServiceImpact impact;
+            if (!buildings.TryGetValue(site.Building, out impact))
+            {
+                impact = new ServiceImpact { Site = site };
+                buildings.Add(site.Building, impact);
+            }
+            else impact.Site = Prefer(impact.Site, site);
+            if (residence >= 0) {
+                impact.Residents++;
+                if (impact.ResidenceDistrict < 0 || impact.ResidenceDistrict == site.District)
+                    impact.ResidenceDistrict = residence;
+            }
+        }
+
+        private static ServiceComplaintSite Prefer(ServiceComplaintSite current, ServiceComplaintSite candidate)
+        {
+            if (current == null) return candidate;
+            if (candidate == null) return current;
+            if (candidate.Severity > current.Severity ||
+                (candidate.Severity == current.Severity && candidate.Cause == ServiceComplaintCause.Fire &&
+                    current.Cause != ServiceComplaintCause.Fire)) return candidate;
+            return current;
+        }
+
+        private static void MergeSample(ref Sample sample, Sample source)
+        {
+            sample.Harms |= source.Harms;
+            sample.Severe |= source.Severe;
+            sample.Pending |= source.Pending;
+            sample.Deathcare = Prefer(sample.Deathcare, source.Deathcare);
+            sample.Fire = Prefer(sample.Fire, source.Fire);
+        }
         private void Remember(int region,int reason,uint citizen,ushort home,Building[] buildings)
         {
             if(region<0 || home==0 || home>=buildings.Length || !Suitable(buildings[home]))return;
@@ -42,14 +99,16 @@ namespace CivicPressure
             if(building==0 || !Suitable(buildings[building]))return;
             Sites.Add(key,new ComplaintSite{Building=building,BuildIndex=buildings[building].m_buildIndex,Reason=reason});
         }
-        private readonly AmenityCoverage amenities = new AmenityCoverage();
+        private readonly AmenityCoverage amenities;
         private int buildingCursor = 1, citizenCursor = 1, citizenCapacity;
         internal int Progress { get { return (int)(100L * (buildingCursor + citizenCursor - 2) / Math.Max(1, samples.Length + citizenCapacity - 2)); } }
 
         internal CityCensus(int capacity)
         {
             samples = new Sample[capacity];
-            if (Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.Education))
+            UnlockManager unlocks = Singleton<UnlockManager>.instance;
+            amenities = new AmenityCoverage();
+            if (unlocks.Unlocked(ItemClass.Service.Education))
                 for (uint p = 0; p < PrefabCollection<BuildingInfo>.LoadedCount(); p++) {
                     BuildingInfo info = PrefabCollection<BuildingInfo>.GetLoaded(p);
                     if (info == null || !(info.m_buildingAI is SchoolAI) || info.m_class == null) continue;
@@ -72,17 +131,32 @@ namespace CivicPressure
                 {
                     if((buildingCursor&63)==0 && System.Diagnostics.Stopwatch.GetTimestamp()>=budgetEnd) break;
                     Building b = buildings[buildingCursor];
-                    if (!CivicSimulation.Live(b)) { CrimeWait.Forget((uint)buildingCursor); continue; }
+                    if (!CivicSimulation.Live(b))
+                    {
+                        CrimeWait.Forget((uint)buildingCursor);
+                        DeathcareWait.Forget((uint)buildingCursor);
+                        FireWait.Forget((uint)buildingCursor);
+                        continue;
+                    }
                     byte district = Singleton<DistrictManager>.instance.GetDistrict(b.m_position);
                     Sample sample = Read((ushort)buildingCursor, b); sample.District = district;
+                    RememberService(-1, 13, sample.Deathcare);
+                    RememberService(-1, 14, sample.Fire);
                     if (b.Info != null && b.Info.m_class.m_service == ItemClass.Service.Residential)
                     {
                         sample.Needs |= amenities.Missing(b.m_position);
+                        ushort id = (ushort)buildingCursor;
+                        sample.FireCoverage = CoverageGap(id, b, ServiceComplaintCause.FireCoverage);
+                        sample.PoliceCoverage = CoverageGap(id, b, ServiceComplaintCause.PoliceCoverage);
+                        sample.MedicalCoverage = CoverageGap(id, b, ServiceComplaintCause.MedicalCoverage);
+                        if (sample.FireCoverage != null) sample.Needs |= 1 << 14;
+                        if (sample.PoliceCoverage != null) sample.Needs |= 1 << 12;
+                        if (sample.MedicalCoverage != null) sample.Needs |= 1 << 11;
                     }
                     if (b.m_parentBuilding != 0 && b.m_parentBuilding < buildings.Length && CivicSimulation.Live(buildings[b.m_parentBuilding]))
                     {
                         Sample parent = Read(b.m_parentBuilding, buildings[b.m_parentBuilding]);
-                        sample.Harms |= parent.Harms; sample.Severe |= parent.Severe;
+                        MergeSample(ref sample, parent);
                     }
                     samples[buildingCursor] = sample;
                     if (b.m_parentBuilding != 0) continue;
@@ -133,19 +207,27 @@ namespace CivicPressure
                 if ((needs & (1 << 8)) != 0) sample.Severe |= 1 << 8;
                 Merge(ref sample, c.m_workBuilding, buildings);
                 if (c.CurrentLocation == Citizen.Location.Visit) Merge(ref sample, c.m_visitBuilding, buildings);
+                RememberService(district, 13, sample.Deathcare);
+                RememberService(district, 14, sample.Fire);
+                if (sample.FireCoverage != null && (sample.Fire == null || sample.Fire.Building != sample.FireCoverage.Building))
+                    RememberService(district, 14, sample.FireCoverage);
+                else if (sample.FireCoverage != null)
+                    RememberService(-1, 14, sample.FireCoverage);
+                RememberService(district, 11, sample.MedicalCoverage);
+                RememberService(district, 12, sample.PoliceCoverage);
                 // Utility shortage counters on Citizen retain history until ResidentAI next updates.
                 // Current home/work/visit building notifications above are the source for active outages.
                 int health = ComplaintMapping.HealthSeverity(c, sample.Severe);
                 bool receivingCare = c.CurrentLocation == Citizen.Location.Visit && c.m_visitBuilding != 0 &&
                     c.m_visitBuilding < buildings.Length && Suitable(buildings[c.m_visitBuilding]) &&
                     buildings[c.m_visitBuilding].Info != null && buildings[c.m_visitBuilding].Info.m_buildingAI is HospitalAI;
-                sample.Harms &= ~((1 << 6) | (1 << 11)); sample.Severe &= ~((1 << 6) | (1 << 11));
-                if (MedicalWait.Observe((uint)citizenCursor, c.m_homeBuilding,
-                    Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.HealthCare) && health > 0 && !receivingCare,
-                    Singleton<SimulationManager>.instance.m_currentGameTime.Ticks))
+                bool awaitingCare = Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.HealthCare) && health > 0 && !receivingCare;
+                if (MedicalWait.Observe((uint)citizenCursor, c.m_homeBuilding, awaitingCare, observedAt))
                 {
-                    AddState(ref sample, 6, health); AddState(ref sample, 11, health);
+                    AddState(ref sample, 6, health);
                 }
+                else if (awaitingCare) sample.Pending |= 1 << 6;
+                if (district >= 0) PendingByDistrict[district] |= sample.Pending;
                 CitizenInstance[] instances = Singleton<CitizenManager>.instance.m_instances.m_buffer;
                 if (c.m_instance != 0 && c.m_instance < instances.Length) {
                     CitizenInstance waiting = instances[c.m_instance];
@@ -195,7 +277,7 @@ namespace CivicPressure
         private void Merge(ref Sample sample, ushort id, Building[] buildings)
         {
             if (id == 0 || id >= samples.Length || !CivicSimulation.Live(buildings[id])) return;
-            sample.Harms |= samples[id].Harms; sample.Severe |= samples[id].Severe;
+            MergeSample(ref sample, samples[id]);
         }
 
         private static bool Suitable(Building b)
@@ -209,34 +291,75 @@ namespace CivicPressure
             int mask = ComplaintMapping.Harms(b.m_problems);
             int severe = b.m_problems.IsMajor || b.m_problems.IsFatal || (b.m_flags & Building.Flags.Abandoned) != 0 ? mask : 0;
             // Replace unrelated notification-group severity with each building overlay's own scalar.
-            mask &= ~((1 << 4) | (1 << 5)); severe &= ~((1 << 4) | (1 << 5));
+            const int independent = (1 << 4) | (1 << 5) | (1 << 13);
+            mask &= ~independent; severe &= ~independent;
             Sample result = new Sample { Harms = mask, Severe = severe };
-            if (Suitable(b) && b.Info != null && b.Info.m_buildingAI is CommonBuildingAI)
+            long now = Singleton<SimulationManager>.instance.m_currentGameTime.Ticks;
+            bool awaitingCollection = AwaitingCollection(b);
+            long deathWait = DeathcareWait.ObserveDuration(id, b.m_buildIndex, awaitingCollection, now);
+            if (awaitingCollection)
             {
-                AddState(ref result, 4, BuildingServiceRules.GarbageSeverity(b.m_garbageBuffer));
-                int hazard, size, tolerance;
-                if (Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.FireDepartment) &&
-                    b.Info.m_buildingAI.GetFireParameters(id, ref b, out hazard, out size, out tolerance))
-                {
-                    byte district = Singleton<DistrictManager>.instance.GetDistrict(b.m_position);
-                    bool detectors = (Singleton<DistrictManager>.instance.m_districts.m_buffer[district].m_servicePolicies & DistrictPolicies.Services.SmokeDetectors) != 0;
-                    int coverage = Singleton<CoverageManager>.instance.FindFireCoverage(b.CalculateAccessPosition(0f, 0f));
-                    AddState(ref result, 14, BuildingServiceRules.FireSeverity(hazard, size, tolerance, coverage, detectors));
-                }
+                int severity = BuildingServiceRules.DeathcareSeverity(deathWait);
+                result.Deathcare = ServiceSite(id, b, ServiceComplaintCause.Deathcare, severity, deathWait);
+                AddState(ref result, 13, severity);
             }
+            bool burning = b.m_fireIntensity > 0;
+            long fireWait = FireWait.ObserveDuration(id, b.m_buildIndex, burning, now);
+            if (burning)
+            {
+                int severity = BuildingServiceRules.ActiveFireSeverity(fireWait);
+                result.Fire = ServiceSite(id, b, ServiceComplaintCause.Fire, severity, fireWait);
+                AddState(ref result, 14, severity);
+            }
+            if (Suitable(b) && b.Info != null && b.Info.m_buildingAI is CommonBuildingAI)
+                AddState(ref result, 4, BuildingServiceRules.GarbageSeverity(b.m_garbageBuffer));
             int crime = Suitable(b) && b.Info != null && b.Info.m_buildingAI is CommonBuildingAI &&
                 Singleton<UnlockManager>.instance.Unlocked(ItemClass.Service.PoliceDepartment)
                 ? BuildingServiceRules.CrimeSeverity(b.m_crimeBuffer, b.m_citizenCount) : 0;
-            if (CrimeWait.Observe(id, b.m_buildIndex, crime > 0, Singleton<SimulationManager>.instance.m_currentGameTime.Ticks))
-            { AddState(ref result, 5, crime); AddState(ref result, 12, crime); }
+            if (CrimeWait.Observe(id, b.m_buildIndex, crime > 0, now))
+                AddState(ref result, 5, crime);
+            else if (crime > 0) result.Pending |= 1 << 5;
             // Congestion is a separate proxy; a building's red power icon must not amplify it.
             NetSegment[] roads = Singleton<NetManager>.instance.m_segments.m_buffer;
             ushort road = b.m_accessSegment;
             if (road != 0 && road < roads.Length &&
                 (roads[road].m_flags & (NetSegment.Flags.Created | NetSegment.Flags.Deleted)) == NetSegment.Flags.Created &&
                 roads[road].Info != null && roads[road].Info.m_class.m_service == ItemClass.Service.Road && roads[road].m_trafficDensity >= 80) AddState(ref result, 2, roads[road].m_trafficDensity >= 95 ? 2 : 1);
-            if (b.m_fireIntensity > 0) AddState(ref result, 14, 2);
             return result;
+        }
+
+        internal static bool AwaitingCollection(Building b)
+        {
+            return (b.m_problems.m_Problems1 & Notification.Problem1.Death) != 0;
+        }
+
+        private static ServiceComplaintSite CoverageGap(ushort id, Building building, ServiceComplaintCause cause)
+        {
+            return MissingCoverage(building, cause) ? ServiceSite(id, building, cause, 1, 0) : null;
+        }
+
+        internal static bool MissingCoverage(Building building, ServiceComplaintCause cause)
+        {
+            if (!Suitable(building) || building.Info == null || building.Info.m_class == null ||
+                building.Info.m_class.m_service != ItemClass.Service.Residential) return false;
+            UnlockManager unlocks = Singleton<UnlockManager>.instance;
+            if (cause == ServiceComplaintCause.FireCoverage)
+                return unlocks.Unlocked(ItemClass.Service.FireDepartment) &&
+                    Singleton<CoverageManager>.instance.FindFireCoverage(building.CalculateAccessPosition(0f, 0f)) == 0;
+            bool medical = cause == ServiceComplaintCause.MedicalCoverage;
+            if (!unlocks.Unlocked(medical ? ItemClass.Service.HealthCare : ItemClass.Service.PoliceDepartment)) return false;
+            int value;
+            Singleton<ImmaterialResourceManager>.instance.CheckLocalResource(medical ?
+                ImmaterialResourceManager.Resource.HealthCare : ImmaterialResourceManager.Resource.PoliceDepartment,
+                building.m_position, out value);
+            return value == 0;
+        }
+
+        private static ServiceComplaintSite ServiceSite(ushort id, Building b, ServiceComplaintCause cause, int severity, long elapsed)
+        {
+            return new ServiceComplaintSite { Building = id, BuildIndex = b.m_buildIndex,
+                District = Singleton<DistrictManager>.instance.GetDistrict(b.m_position), Cause = cause,
+                Severity = severity, ObservedHours = elapsed / (double)GameClock.HourTicks };
         }
 
         private static void AddState(ref Sample sample, int reason, int severity)
@@ -267,16 +390,14 @@ namespace CivicPressure
         {
             return Severity(Math.Min(100, garbage / 50), 100);
         }
-        internal static int FireSeverity(int hazard, int size, int tolerance, int coverage, bool detectors)
+        internal static int DeathcareSeverity(long observed)
         {
-            // Risk alone is advisory when the game reports fire-service coverage.
-            // Actual fires are counted separately by Read, regardless of coverage.
-            if (coverage > 0) return 0;
-            if (hazard < 0 || size < 0 || tolerance < 0) return 0;
-            if (detectors) hazard = hazard * 75 / 100;
-            int good = (int)Math.Min(100L, (10L + tolerance) * (25 + coverage * 100 / 255) * 2000 /
-                ((100L + hazard) * (100L + size)));
-            return Severity(100 - good, 100);
+            if (observed >= GameClock.Hours(6)) return 2;
+            return 1;
+        }
+        internal static int ActiveFireSeverity(long observed)
+        {
+            return observed >= GameClock.Hours(3) ? 2 : 0;
         }
         internal static int EducationSeverity(Citizen citizen, Building home)
         {

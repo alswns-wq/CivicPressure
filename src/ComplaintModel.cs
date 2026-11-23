@@ -63,6 +63,7 @@ namespace CivicPressure
         internal long Since, Deadline, QuietUntil, OfficeUntil;
         internal long ImprovingSince;
         internal bool Open, Warned, Promised;
+        internal bool RecheckingService, ServiceAlerted;
         internal double LaborBaseline;
         internal bool LaborExtended;
     }

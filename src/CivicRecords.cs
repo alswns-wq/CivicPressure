@@ -224,7 +224,10 @@ namespace CivicPressure
         {
             RegionView region = n.Origin < 0 ? city.All : city.Regions[n.Origin];
             if (!city.HasCityHall || region == null || !UnrestRules.CanProtest(n.Origin < 0 ? city.CityScore : region.Score)) return false;
-            if(n.Origin>=0 && CivicComplaints.Local(n.Reason)) {
+            if(n.Origin>=0 && ServiceComplaintSite.Applies(n.Reason)) {
+                if(CivicComplaints.ServiceRecovered(n.Origin,n.Reason,region.Residents))return false;
+            }
+            else if(n.Origin>=0 && CivicComplaints.Local(n.Reason)) {
                 if(ComplaintRules.Recovered(n.Reason,CivicComplaints.Affected(region,n.Origin,n.Reason),CivicComplaints.Severe(region,n.Origin,n.Reason),CivicComplaints.Population(region,n.Origin,n.Reason)))return false;
             }
             else if (ComplaintRules.Recovered(n.Reason, region.Affected[n.Reason], region.Severe[n.Reason], region.Residents)) return false;
